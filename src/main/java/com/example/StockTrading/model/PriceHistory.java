@@ -1,6 +1,5 @@
-package com.trading.app.model;
+package com.example.StockTrading.model;
 
-import com.example.StockTrading.model.Stock;
 import jakarta.persistence.*;
 import lombok.Data;
 import java.time.LocalDateTime;
@@ -21,5 +20,6 @@ public class PriceHistory {
     @Column(nullable = false)
     private Double price;
 
+    @Column(nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 }
