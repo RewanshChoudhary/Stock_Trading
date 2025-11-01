@@ -18,13 +18,13 @@ public class User {
     @Column(nullable = false, unique = true)
     private String username;
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = true, unique = true)
     private String email;
 
     @Column(nullable = false)
     private String passwordHash; // store hashed password only
 
-    @Column(nullable = false)
+
     private Double balance = 0.0;
 
     private LocalDateTime createdAt = LocalDateTime.now();

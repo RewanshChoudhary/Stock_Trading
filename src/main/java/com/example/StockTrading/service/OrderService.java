@@ -21,7 +21,7 @@ public class OrderService {
     }
     public void cancelOrder(Long orderId){
         Order order=orderRepository.findById(orderId)
-                .orElseThrow(()->throw new RuntimeException("Order not found"));
+                .orElseThrow(()-> new RuntimeException("Order not found"));
         order.setStatus(CANCELLED);
         orderRepository.save(order);
 

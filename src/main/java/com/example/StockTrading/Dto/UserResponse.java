@@ -1,10 +1,11 @@
 package com.example.StockTrading.Dto;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
-
-@Data
 @Builder
+@Data
+@AllArgsConstructor
 
 public class UserResponse {
     private Long id;

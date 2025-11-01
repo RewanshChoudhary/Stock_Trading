@@ -3,7 +3,7 @@ package com.example.StockTrading.controller;
 import com.example.StockTrading.Dto.UserLoginRequest;
 import com.example.StockTrading.Dto.UserRegisterRequest;
 import com.example.StockTrading.Dto.UserResponse;
-import com.example.StockTrading.dto.*;
+
 import com.example.StockTrading.model.User;
 import com.example.StockTrading.repository.UserRepository;
 import com.example.StockTrading.service.UserService;
@@ -28,6 +28,7 @@ public class UserController {
         User user = new User();
         user.setUsername(request.getUsername());
 user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+
 
 
 
@@ -59,17 +60,14 @@ user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
     @GetMapping("/me")
     public UserResponse getCurrentUser() {
         Long userId = sessionStore.getCurrentUserId();
-        if (userId == null) throw new RuntimeException("Not logged in");
+        if (userId == null) {
+            throw new RuntimeException("Not logged in");
+        }
 
-        User user = userService.login( // re-fetch user
-                userRepository.findById(userId).get().getUsername(),
-                passwordEncoder.encode(userRepository.findById(userId).get().getPasswordHash())
-        );
+        User user = userService.getUserById(userId);
 
-        UserResponse response = new UserResponse();
-        response.setId(user.getId());
-        response.setUsername(user.getUsername());
-        response.setBalance(user.getBalance());
+        UserResponse response = new UserResponse(user.getId(),user.getUsername(),user.getEmail());
         return response;
     }
+
 }
