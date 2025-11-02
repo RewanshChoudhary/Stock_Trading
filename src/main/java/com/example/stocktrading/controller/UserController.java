@@ -69,5 +69,23 @@ public class UserController {
         UserResponse response = new UserResponse(user.getId(),user.getUsername(),user.getEmail());
         return response;
     }
+       @GetMapping("/me/positions")
+    public ResponseEntity<List<Position>> getUserPositions() {
+        String userId = SessionStore.getCurrentUserId();
+        return ResponseEntity.ok(positionService.getUserPositions(userId));
+    }
+
+    @GetMapping("/me/orders")
+    public ResponseEntity<List<Order>> getUserOrders() {
+        String userId = SessionStore.getCurrentUserId();
+        return ResponseEntity.ok(orderService.getUserOpenOrders(userId));
+    }
+
+    @GetMapping("/me/trades")
+    public ResponseEntity<List<Trade>> getUserTrades() {
+        String userId = SessionStore.getCurrentUserId();
+        return ResponseEntity.ok(tradeService.getUserTrades(userId));
+    }
+    
 
 }

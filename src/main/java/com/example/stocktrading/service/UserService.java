@@ -60,5 +60,8 @@ public class UserService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
     }
 
+    public User updateBalance(User user) {
+        return userRepository.save(user);
+    }
 
 }

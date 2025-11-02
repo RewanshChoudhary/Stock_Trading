@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Stock Ticker</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .status {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .status.connected {
+            color: #4ade80;
+        }
+        .status.disconnected {
+            color: #f87171;
+        }
+        .ticker-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .stock-card {
+            padding: 20px;
+            border-bottom: 1px solid #e5e7eb;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 15px;
+            transition: background-color 0.3s ease;
+        }
+        .stock-card:hover {
+            background-color: #f9fafb;
+        }
+        .stock-card:last-child {
+            border-bottom: none;
+        }
+        .stock-info h3 {
+            margin: 0 0 5px 0;
+            font-size: 18px;
+            color: #1f2937;
+        }
+        .stock-info .symbol {
+            color: #6b7280;
+            font-size: 14px;
+        }
+        .price-info {
+            text-align: center;
+        }
+        .current-price {
+            font-size: 28px;
+            font-weight: bold;
+            margin: 0;
+            color: #1f2937;
+        }
+        .price-change {
+            font-size: 14px;
+            margin: 5px 0 0 0;
+            font-weight: 600;
+        }
+        .price-change.positive {
+            color: #10b981;
+        }
+        .price-change.negative {
+            color: #ef4444;
+        }
+        .price-change.neutral {
+            color: #6b7280;
+        }
+        .trades-section h4 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #6b7280;
+        }
+        .trade-item {
+            font-size: 12px;
+            padding: 4px 0;
+            color: #4b5563;
+        }
+        .no-stocks {
+            text-align: center;
+            padding: 60px 20px;
+            color: #9ca3af;
+            font-size: 18px;
+        }
+        .last-update {
+            text-align: center;
+            padding: 15px;
+            color: #6b7280;
+            font-size: 12px;
+            background-color: #f9fafb;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .updating {
+            animation: pulse 0.5s ease-in-out;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📈 Live Stock Ticker</h1>
+        <div class="status" id="status">⚫ Connecting...</div>
+        
+        <div class="ticker-container">
+            <div id="stocks-container">
+                <div class="no-stocks">Waiting for price updates...</div>
+            </div>
+        </div>
+        
+        <div class="last-update" id="last-update">No updates yet</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <script>
+        let stompClient = null;
+        let stocks = {};
+
+        function connect() {
+            const socket = new SockJS('/ws/prices');
+            stompClient = Stomp.over(socket);
+            
+            stompClient.connect({}, function(frame) {
+                console.log('Connected: ' + frame);
+                updateStatus(true);
+                
+                stompClient.subscribe('/topic/prices', function(message) {
+                    const priceUpdate = JSON.parse(message.body);
+                    updateStockDisplay(priceUpdate);
+                });
+            }, function(error) {
+                console.error('WebSocket error:', error);
+                updateStatus(false);
+                setTimeout(connect, 5000);
+            });
+        }
+
+        function updateStatus(connected) {
+            const statusEl = document.getElementById('status');
+            if (connected) {
+                statusEl.textContent = '🟢 Connected';
+                statusEl.className = 'status connected';
+            } else {
+                statusEl.textContent = '🔴 Disconnected';
+                statusEl.className = 'status disconnected';
+            }
+        }
+
+        function updateStockDisplay(priceUpdate) {
+            stocks[priceUpdate.stockId] = priceUpdate;
+            renderStocks();
+            updateLastUpdateTime();
+        }
+
+        function renderStocks() {
+            const container = document.getElementById('stocks-container');
+            
+            if (Object.keys(stocks).length === 0) {
+                container.innerHTML = '<div class="no-stocks">Waiting for price updates...</div>';
+                return;
+            }
+
+            container.innerHTML = '';
+            
+            Object.values(stocks).forEach(stock => {
+                const stockCard = document.createElement('div');
+                stockCard.className = 'stock-card updating';
+                
+                const changeClass = stock.changePercent > 0 ? 'positive' : 
+                                   stock.changePercent < 0 ? 'negative' : 'neutral';
+                const changeSymbol = stock.changePercent > 0 ? '▲' : 
+                                    stock.changePercent < 0 ? '▼' : '●';
+                
+                stockCard.innerHTML = `
+                    <div class="stock-info">
+                        <h3>${stock.name}</h3>
+                        <div class="symbol">${stock.symbol}</div>
+                    </div>
+                    
+                    <div class="price-info">
+                        <p class="current-price">$${stock.newPrice.toFixed(2)}</p>
+                        <p class="price-change ${changeClass}">
+                            ${changeSymbol} ${Math.abs(stock.changePercent).toFixed(2)}%
+                        </p>
+                    </div>
+                    
+                    <div class="trades-section">
+                        <h4>Recent Trades</h4>
+                        ${stock.recentTrades && stock.recentTrades.length > 0 
+                            ? stock.recentTrades.slice(0, 3).map(trade => `
+                                <div class="trade-item">
+                                    ${trade.quantity} @ $${trade.price.toFixed(2)}
+                                </div>
+                            `).join('')
+                            : '<div class="trade-item">No recent trades</div>'
+                        }
+                    </div>
+                `;
+                
+                container.appendChild(stockCard);
+                
+                setTimeout(() => stockCard.classList.remove('updating'), 500);
+            });
+        }
+
+        function updateLastUpdateTime() {
+            const now = new Date();
+            document.getElementById('last-update').textContent = 
+                `Last update: ${now.toLocaleTimeString()}`;
+        }
+
+        // Connect on page load
+        connect();
+    </script>
+</body>
+</html>
