@@ -4,13 +4,22 @@ import com.example.stocktrading.dto.UserLoginRequest;
 import com.example.stocktrading.dto.UserRegisterRequest;
 import com.example.stocktrading.dto.UserResponse;
 
+import com.example.stocktrading.model.Order;
+import com.example.stocktrading.model.Position;
+import com.example.stocktrading.model.Trade;
 import com.example.stocktrading.model.User;
 
+import com.example.stocktrading.service.OrderService;
+import com.example.stocktrading.service.PositionService;
+import com.example.stocktrading.service.TradeService;
 import com.example.stocktrading.service.UserService;
 import com.example.stocktrading.store.SessionStore;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/users")
@@ -20,6 +29,10 @@ public class UserController {
     private final UserService userService;
     private final SessionStore sessionStore;
     private final BCryptPasswordEncoder passwordEncoder;
+    private final TradeService tradeService;
+    private final OrderService orderService;
+    private final PositionService positionService;
+
 
 
 
@@ -69,7 +82,7 @@ public class UserController {
         UserResponse response = new UserResponse(user.getId(),user.getUsername(),user.getEmail());
         return response;
     }
-       @GetMapping("/me/positions")
+    @GetMapping("/me/positions")
     public ResponseEntity<List<Position>> getUserPositions() {
         String userId = SessionStore.getCurrentUserId();
         return ResponseEntity.ok(positionService.getUserPositions(userId));
