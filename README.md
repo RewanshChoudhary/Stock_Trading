@@ -125,18 +125,23 @@ PUT /stocks/{stockId}/price
 - Body: { "price": number }
 ```
 
-### Portfolio Management
+##WorkFlow
 ```
-GET /portfolio
-- Get user's portfolio summary
-
-POST /portfolio/positions
-- Create new position
-- Body: { "stockId": number, "quantity": number }
-
-PUT /portfolio/positions/{positionId}
-- Update existing position
-- Body: { "quantity": number }
+User Register/Login → Wallet Initialized
+       ↓
+Market Bootstrapped → Stocks Loaded
+       ↓
+Scheduler Generates Live Prices
+       ↓
+User Places Buy/Sell Order
+       ↓
+Validation → Order Book Entry
+       ↓
+Matching Engine Runs → Trade Executed
+       ↓
+Wallet & Portfolio Updated
+       ↓
+WebSocket Sends Real-time Updates
 ```
 
 ## Project Structure
