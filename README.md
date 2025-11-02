@@ -21,65 +21,71 @@ A robust stock trading platform built with Spring Boot that enables users to man
 - Testing: JUnit, Spring Test
 
 ## Entity Relationship Diagram (ERD)
-```mermaid
-erDiagram
+
+
     USER {
-        int user_id PK
-        string username
+        uuid id PK
+        string name
         string email
-        string password_hash
-        datetime created_at
-        datetime last_login
-    }
-    
-    PORTFOLIO {
-        int portfolio_id PK
-        int user_id FK
-        string name
-        decimal total_value
-        datetime created_at
-        datetime updated_at
-    }
-    
-    STOCK {
-        string symbol PK
-        string company_name
-        string description
-        string sector
-        decimal current_price
-        datetime last_updated
-    }
-    
-    TRANSACTION {
-        int transaction_id PK
-        int portfolio_id FK
-        string stock_symbol FK
-        string type
-        int quantity
-        decimal price
-        datetime transaction_date
-    }
-    
-    WATCHLIST {
-        int watchlist_id PK
-        int user_id FK
-        string name
-        datetime created_at
-    }
-    
-    WATCHLIST_ITEM {
-        int watchlist_id FK
-        string stock_symbol FK
-        datetime added_at
+        string passwordHash
+        double balance
+        timestamp createdAt
     }
 
-    USER ||--o{ PORTFOLIO : "has"
-    USER ||--o{ WATCHLIST : "creates"
-    PORTFOLIO ||--o{ TRANSACTION : "contains"
-    WATCHLIST ||--o{ WATCHLIST_ITEM : "includes"
-    STOCK ||--o{ TRANSACTION : "involved_in"
-    STOCK ||--o{ WATCHLIST_ITEM : "listed_in"
-```
+    STOCK {
+        uuid id PK
+        string symbol
+        string name
+        double currentPrice
+        double lastPrice
+        timestamp updatedAt
+    }
+
+    ORDER {
+        uuid id PK
+        uuid userId FK
+        uuid stockId FK
+        enum type  // BUY or SELL
+        double price
+        int quantity
+        int remainingQuantity
+        enum status // PENDING, PARTIAL, FILLED, CANCELLED
+        timestamp createdAt
+    }
+
+    TRADE {
+        uuid id PK
+        uuid buyOrderId FK
+        uuid sellOrderId FK
+        uuid stockId FK
+        double price
+        int quantity
+        timestamp createdAt
+    }
+
+    POSITION {
+        uuid id PK
+        uuid userId FK
+        uuid stockId FK
+        int quantity
+        double avgPrice
+        timestamp updatedAt
+    }
+
+    PRICE_HISTORY {
+        uuid id PK
+        uuid stockId FK
+        double price
+        timestamp createdAt
+    }
+
+    USER ||--o{ ORDER : places
+    USER ||--o{ POSITION : holds
+    STOCK ||--o{ ORDER : has
+    STOCK ||--o{ POSITION : belongs
+    ORDER ||--o{ TRADE : executes
+    STOCK ||--o{ TRADE : trades
+    STOCK ||--o{ PRICE_HISTORY : tracks
 
 ## API Endpoints
 
@@ -181,12 +187,6 @@ npm install
 node websocket-client.js
 ```
 
-## Contributing
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
 
 ## License
 This project is licensed under the MIT License
