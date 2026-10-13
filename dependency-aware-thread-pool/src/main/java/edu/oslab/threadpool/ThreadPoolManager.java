@@ -1,5 +1,6 @@
 package edu.oslab.threadpool;
 
+import edu.oslab.threadpool.classifier.LaneClassifier;
 import edu.oslab.threadpool.scheduler.SchedulerPolicy;
 
 import java.time.Duration;
@@ -21,6 +22,7 @@ public final class ThreadPoolManager implements AutoCloseable {
     private final SchedulerPolicy scheduler;
     private final DependencyGraph dependencyGraph = new DependencyGraph();
     private final Dispatcher dispatcher;
+    private final LaneClassifier laneClassifier;
     private final Map<String, Task> tasks = new LinkedHashMap<>();
     private final Set<WorkerThread> workers = new LinkedHashSet<>();
     private final int minWorkerCount;
@@ -58,6 +60,17 @@ public final class ThreadPoolManager implements AutoCloseable {
             SchedulerPolicy scheduler,
             Duration idleShrinkDelay,
             int maxVirtualTasks) {
+        this(initialWorkerCount, minWorkerCount, maxWorkerCount, scheduler, idleShrinkDelay, maxVirtualTasks, false);
+    }
+
+    public ThreadPoolManager(
+            int initialWorkerCount,
+            int minWorkerCount,
+            int maxWorkerCount,
+            SchedulerPolicy scheduler,
+            Duration idleShrinkDelay,
+            int maxVirtualTasks,
+            boolean classificationEnabled) {
         if (minWorkerCount < 1 || initialWorkerCount < minWorkerCount || maxWorkerCount < initialWorkerCount) {
             throw new IllegalArgumentException("Worker counts must satisfy 1 <= min <= initial <= max");
         }
@@ -67,6 +80,7 @@ public final class ThreadPoolManager implements AutoCloseable {
         }
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.dispatcher = new Dispatcher(this, maxVirtualTasks);
+        this.laneClassifier = new LaneClassifier(classificationEnabled);
         this.minWorkerCount = minWorkerCount;
         this.maxWorkerCount = maxWorkerCount;
         this.idleShrinkDelay = idleShrinkDelay;
@@ -111,6 +125,7 @@ public final class ThreadPoolManager implements AutoCloseable {
             tasks.forEach((id, task) -> burstEstimates.put(id, task.spec().estimatedBurstMillis()));
             dependencyGraph.computeCriticalPathWeights(burstEstimates)
                     .forEach((id, weight) -> tasks.get(id).setCriticalPathWeight(weight));
+            scheduler.refreshPriorities();
             for (String id : readyIds) {
                 makeReadyLocked(tasks.get(id), now);
             }
@@ -162,7 +177,7 @@ public final class ThreadPoolManager implements AutoCloseable {
         long remaining = timeout.toNanos();
         lock.lockInterruptibly();
         try {
-            while (!workers.isEmpty() || dispatcher.virtualInFlight() > 0) {
+            while (!workers.isEmpty() || dispatcher.virtualTasksPending() > 0) {
                 if (remaining <= 0) {
                     return false;
                 }
@@ -241,10 +256,6 @@ public final class ThreadPoolManager implements AutoCloseable {
                     return null;
                 }
 
-                boolean dispatchVirtual(Task task) {
-                    return dispatcher.dispatch(task);
-                }
-
                 long now = System.nanoTime();
                 if (!shutdownRequested
                         && workers.size() > minWorkerCount
@@ -261,6 +272,18 @@ public final class ThreadPoolManager implements AutoCloseable {
         } finally {
             lock.unlock();
         }
+    }
+
+    boolean dispatchVirtual(Task task) {
+        return laneClassifier.classify(task) == Lane.VIRTUAL && dispatcher.dispatch(task);
+    }
+
+    void observeLane(Task task, long cpuTimeNanos, long wallTimeNanos) {
+        laneClassifier.observe(task, cpuTimeNanos, wallTimeNanos);
+    }
+
+    boolean laneClassificationEnabled() {
+        return laneClassifier.enabled();
     }
 
     void finishSlice(Task task, SliceResult result, Throwable failure) {
@@ -293,7 +316,10 @@ public final class ThreadPoolManager implements AutoCloseable {
     void signalShutdownIfDone() {
         lock.lock();
         try {
-            if (shutdownRequested && workers.isEmpty() && dispatcher.virtualInFlight() == 0 && allTasksTerminalLocked()) {
+            if (shutdownRequested
+                    && workers.isEmpty()
+                    && dispatcher.virtualTasksPending() == 0
+                    && allTasksTerminalLocked()) {
                 stateChanged.signalAll();
             }
         } finally {

@@ -64,7 +64,6 @@ public final class ScalingStudy {
     private RunMetrics runOnce(int taskCount, long seed, SchedulerPolicy policy) throws InterruptedException {
         List<edu.oslab.threadpool.TaskSpec> specs =
                 RandomDagFactory.generate(taskCount, edgeDensity, seed);
-        long started = System.nanoTime();
         List<TaskMetrics> metrics;
         try (ThreadPoolManager pool = new ThreadPoolManager(WORKER_COUNT, policy)) {
             pool.submitBatch(specs);
@@ -76,9 +75,12 @@ public final class ScalingStudy {
         if (metrics.stream().anyMatch(task -> task.state() != TaskState.DONE)) {
             throw new IllegalStateException(policy.name() + " failed one or more scaling-study tasks");
         }
-        double elapsedSeconds = Math.max(1, System.nanoTime() - started) / 1_000_000_000.0;
+        long submittedAt = metrics.stream().mapToLong(TaskMetrics::submittedNanos).min().orElseThrow();
+        long finishedAt = metrics.stream().mapToLong(TaskMetrics::terminalNanos).max().orElseThrow();
+        double makespanMillis = Math.max(1, finishedAt - submittedAt) / 1_000_000.0;
+        double elapsedSeconds = makespanMillis / 1_000.0;
         return new RunMetrics(
-                elapsedSeconds * 1_000,
+                makespanMillis,
                 taskCount / elapsedSeconds,
                 mean(metrics.stream().mapToLong(TaskMetrics::waitingTimeNanos).toArray()) / 1_000_000.0,
                 mean(metrics.stream().mapToLong(TaskMetrics::turnaroundTimeNanos).toArray()) / 1_000_000.0);
@@ -105,6 +107,14 @@ public final class ScalingStudy {
     private static double mean(double[] values) {
         double sum = 0;
         for (double value : values) {
+            sum += value;
+        }
+        return values.length == 0 ? 0 : sum / values.length;
+    }
+
+    private static double mean(long[] values) {
+        double sum = 0;
+        for (long value : values) {
             sum += value;
         }
         return values.length == 0 ? 0 : sum / values.length;

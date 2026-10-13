@@ -2,6 +2,7 @@ package edu.oslab.threadpool.scheduler;
 
 import edu.oslab.threadpool.Task;
 
+import java.util.Comparator;
 import java.util.Objects;
 import java.util.PriorityQueue;
 
@@ -9,12 +10,11 @@ public final class CriticalPathScheduler implements SchedulerPolicy {
     private record Entry(Task task, long sequence) {
     }
 
-    private final PriorityQueue<Entry> ready = new PriorityQueue<>((left, right) -> {
-        int weightOrder = Long.compare(
-                right.task().criticalPathWeight(),
-                left.task().criticalPathWeight());
-        return weightOrder != 0 ? weightOrder : Long.compare(left.sequence(), right.sequence());
-    });
+    private static final Comparator<Entry> ORDER = Comparator
+            .comparingLong((Entry entry) -> entry.task().criticalPathWeight())
+            .reversed()
+            .thenComparingLong(Entry::sequence);
+    private PriorityQueue<Entry> ready = new PriorityQueue<>(ORDER);
     private long nextSequence;
 
     @Override
@@ -51,5 +51,14 @@ public final class CriticalPathScheduler implements SchedulerPolicy {
     @Override
     public int readyCount() {
         return ready.size();
+    }
+
+    @Override
+    public void refreshPriorities() {
+        PriorityQueue<Entry> refreshed = new PriorityQueue<>(Math.max(1, ready.size()), ORDER);
+        for (Entry entry : ready) {
+            refreshed.add(entry);
+        }
+        ready = refreshed;
     }
 }

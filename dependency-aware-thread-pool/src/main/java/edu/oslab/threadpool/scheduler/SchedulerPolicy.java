@@ -16,4 +16,7 @@ public interface SchedulerPolicy {
     void onTaskFinished(Task task);
 
     int readyCount();
+
+    default void refreshPriorities() {
+    }
 }

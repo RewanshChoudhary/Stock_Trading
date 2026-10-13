@@ -24,14 +24,16 @@ public final class MetricsReporter {
         }
         report.append(System.lineSeparator()).append("Per-lane metrics").append(System.lineSeparator());
         report.append(String.format(
-                "%-22s %12s %16s %17s %18s %19s%n",
-                "Policy", "Platform tasks", "Platform wait", "Platform turn.", "Virtual wait", "Virtual turn."));
-        report.append("-".repeat(112)).append(System.lineSeparator());
+                "%-22s %12s %12s %16s %17s %18s %19s%n",
+                "Policy", "Platform tasks", "Virtual tasks", "Platform wait", "Platform turn.", "Virtual wait",
+                "Virtual turn."));
+        report.append("-".repeat(126)).append(System.lineSeparator());
         for (BenchmarkResult result : results) {
             report.append(String.format(
-                    "%-22s %12d %16.3f %17.3f %18.3f %19.3f%n",
+                    "%-22s %12d %12d %16.3f %17.3f %18.3f %19.3f%n",
                     result.policy(),
                     result.platformTaskCount(),
+                    result.virtualTaskCount(),
                     result.platformAverageWaitingMillis(),
                     result.platformAverageTurnaroundMillis(),
                     result.virtualAverageWaitingMillis(),

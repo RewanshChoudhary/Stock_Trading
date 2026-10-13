@@ -11,7 +11,7 @@
     <description>A cooperative, dependency-aware Java thread pool with pluggable task scheduling.</description>
 
     <properties>
-        <maven.compiler.release>25</maven.compiler.release>
+        <maven.compiler.release>27</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>5.12.2</junit.version>
         <slf4j.version>2.0.17</slf4j.version>

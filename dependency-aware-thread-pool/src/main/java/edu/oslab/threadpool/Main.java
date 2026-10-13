@@ -2,7 +2,12 @@ package edu.oslab.threadpool;
 
 import edu.oslab.threadpool.benchmark.BenchmarkHarness;
 import edu.oslab.threadpool.benchmark.MetricsReporter;
+import edu.oslab.threadpool.benchmark.MixedWorkloadBenchmark;
+import edu.oslab.threadpool.benchmark.ScalingReport;
+import edu.oslab.threadpool.benchmark.ScalingStudy;
 import edu.oslab.threadpool.benchmark.WorkloadFactory;
+import edu.oslab.threadpool.experiment.PinningExperiment;
+import edu.oslab.threadpool.scheduler.CriticalPathScheduler;
 import edu.oslab.threadpool.scheduler.FcfsScheduler;
 import edu.oslab.threadpool.scheduler.MlfqScheduler;
 import edu.oslab.threadpool.scheduler.PriorityScheduler;
@@ -27,11 +32,29 @@ public final class Main {
     public static void main(String[] args) throws InterruptedException {
         List<String> flags = Arrays.asList(args);
         if (flags.contains("--hybrid")) {
-            runHybridDemo();
+            int repeats = optionValue(args, "--hybrid", 10);
+            System.out.println(MixedWorkloadBenchmark.format(new MixedWorkloadBenchmark().run(repeats)));
             return;
         }
-        if (flags.contains("--scale") || flags.contains("--pinning")) {
-            System.out.println("This build includes the base scheduler and dependency engine; the newer benchmark/experiment flags are intentionally no-op placeholders.");
+        if (flags.contains("--scale")) {
+            int runs = optionValue(args, "--scale", 10);
+            ScalingReport report =
+                    new ScalingStudy().run(new int[]{50, 100, 200, 300, 500}, runs, 2026);
+            System.out.println(report.formatTable());
+            return;
+        }
+        if (flags.contains("--pinning")) {
+            System.setProperty("jdk.virtualThreadScheduler.parallelism", "4");
+            System.setProperty("jdk.virtualThreadScheduler.maxPoolSize", "4");
+            List<PinningExperiment.Result> results =
+                    new PinningExperiment().run(100, Duration.ofMillis(20));
+            System.out.println("Carrier blocking comparison (JDK " + System.getProperty("java.version")
+                    + ", configured parallelism 4)");
+            for (PinningExperiment.Result result : results) {
+                System.out.printf(
+                        "%-22s elapsed %.3f ms, peak concurrent tasks %d%n",
+                        result.mode(), result.elapsedMillis(), result.peakConcurrency());
+            }
             return;
         }
 
@@ -40,9 +63,10 @@ public final class Main {
                 FcfsScheduler::new,
                 PriorityScheduler::new,
                 RoundRobinScheduler::new,
-                MlfqScheduler::new);
+                MlfqScheduler::new,
+                CriticalPathScheduler::new);
 
-        LOGGER.info("Running the build-pipeline workload under all four scheduling policies");
+        LOGGER.info("Running the build-pipeline workload under all five scheduling policies");
         List<edu.oslab.threadpool.benchmark.BenchmarkResult> results =
                 new BenchmarkHarness(4).compare(pipeline, policies);
         System.out.println("\nScheduling policy comparison");
@@ -60,30 +84,17 @@ public final class Main {
         }
     }
 
-    private static void runHybridDemo() throws InterruptedException {
-        try (ThreadPoolManager pool = new ThreadPoolManager(2, new FcfsScheduler())) {
-            TaskSpec blocking = new TaskSpec(
-                    "io-step",
-                    1,
-                    5,
-                    Set.of(),
-                    quantum -> {
-                        Thread.sleep(20);
-                        return SliceResult.done();
-                    },
-                    true);
-            TaskSpec dependent = new TaskSpec(
-                    "after-io",
-                    1,
-                    5,
-                    Set.of("io-step"),
-                    quantum -> SliceResult.done());
-            pool.submitBatch(List.of(blocking, dependent));
-            if (!pool.awaitCompletion(Duration.ofSeconds(5))) {
-                throw new IllegalStateException("Hybrid demo did not finish on time");
+    private static int optionValue(String[] args, String option, int defaultValue) {
+        for (int index = 0; index < args.length; index++) {
+            if (args[index].equals(option) && index + 1 < args.length) {
+                try {
+                    return Integer.parseInt(args[index + 1]);
+                } catch (NumberFormatException exception) {
+                    throw new IllegalArgumentException("Expected a positive integer after " + option, exception);
+                }
             }
-            System.out.println("Hybrid demo completed with blocking lane metrics: " + pool.taskMetrics());
         }
+        return defaultValue;
     }
 
     private static List<TaskSpec> buildPipelineWorkload() {

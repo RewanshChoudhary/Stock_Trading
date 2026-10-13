@@ -135,7 +135,10 @@ public final class DependencyGraph {
                     .mapToLong(dependent -> weights.getOrDefault(dependent, 0L))
                     .max()
                     .orElse(0);
-            weights.put(id, Math.addExact(estimatedBurstMillis.get(id), longestDependentPath));
+            long ownBurst = estimatedBurstMillis.get(id);
+            weights.put(id, Long.MAX_VALUE - ownBurst < longestDependentPath
+                    ? Long.MAX_VALUE
+                    : ownBurst + longestDependentPath);
         }
         return Map.copyOf(weights);
     }

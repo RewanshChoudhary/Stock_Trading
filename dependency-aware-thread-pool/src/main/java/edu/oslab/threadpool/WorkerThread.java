@@ -1,5 +1,6 @@
 package edu.oslab.threadpool;
 
+import edu.oslab.threadpool.classifier.LaneClassifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,20 +27,36 @@ final class WorkerThread extends Thread {
                 }
                 task.markDispatched(Lane.PLATFORM);
                 LOGGER.debug("Dispatching task {}", task.id());
+                boolean measureCpu = pool.laneClassificationEnabled();
+                long wallStarted = System.nanoTime();
+                long cpuStarted = measureCpu ? LaneClassifier.currentThreadCpuTimeNanos() : -1;
+                SliceResult result = SliceResult.done();
+                Throwable failure = null;
                 try {
-                    SliceResult result = task.spec().work().runSlice(
+                    result = task.spec().work().runSlice(
                             pool.quantumFor(task));
                     if (result == null) {
                         throw new IllegalStateException("Task work returned a null slice result");
                     }
-                    pool.finishSlice(task, result, null);
                 } catch (InterruptedException exception) {
                     Thread.currentThread().interrupt();
-                    pool.finishSlice(task, SliceResult.done(), exception);
-                    return;
-                } catch (Throwable failure) {
+                    failure = exception;
+                } catch (Throwable thrown) {
+                    failure = thrown;
+                }
+                if (measureCpu) {
+                    long cpuFinished = LaneClassifier.currentThreadCpuTimeNanos();
+                    pool.observeLane(
+                            task,
+                            cpuStarted < 0 || cpuFinished < 0 ? -1 : cpuFinished - cpuStarted,
+                            System.nanoTime() - wallStarted);
+                }
+                if (failure != null) {
                     LOGGER.error("Task {} failed", task.id(), failure);
-                    pool.finishSlice(task, SliceResult.done(), failure);
+                }
+                pool.finishSlice(task, result, failure);
+                if (Thread.currentThread().isInterrupted()) {
+                    return;
                 }
             }
         } catch (InterruptedException exception) {

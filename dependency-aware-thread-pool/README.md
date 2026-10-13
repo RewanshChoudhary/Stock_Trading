@@ -2,16 +2,17 @@
 
 A single-JVM operating-systems project that implements a worker pool directly
 with `Thread`, `ReentrantLock`, and `Condition`. Tasks can name prerequisite
-tasks, and only become schedulable after those prerequisites finish. Four
+tasks, and only become schedulable after those prerequisites finish. Five
 pluggable policies schedule the ready queue: FCFS, priority with aging, Round
-Robin, and a three-level multilevel feedback queue (MLFQ).
+Robin, a three-level multilevel feedback queue (MLFQ), and critical-path
+priority.
 
 ## Requirements
 
-- JDK 25
+- JDK 27
 - Apache Maven 3.9+
 
-The Maven compiler is configured with `--release 25`.
+The Maven compiler is configured with `--release 27`.
 
 ## Build, test, and run
 
@@ -20,12 +21,24 @@ From this directory:
 ```bash
 mvn test
 mvn exec:java
+mvn exec:java -Dexec.args="--scale"
+mvn exec:java -Dexec.args="--hybrid"
+mvn exec:java -Dexec.args="--pinning"
 ```
 
-The demo runs the same nine-task build pipeline through all four policies,
-prints throughput, average waiting time, and average turnaround time, then
-submits a deliberately cyclic batch and prints the rejected cycle path. Log
-lines include worker thread names so that task interleaving is visible.
+The demo runs the same nine-task build pipeline through all five policies,
+prints total and per-lane metrics, then submits a deliberately cyclic batch and
+prints the rejected cycle path. Log lines include worker thread names so that
+task interleaving is visible.
+
+`--scale [runs]` runs a reproducible randomized-DAG scaling study for 50, 100,
+200, 300, and 500 tasks under each policy; the optional run count defaults to
+10. `--hybrid [runs]` compares platform-only, virtual-only, and hybrid
+execution over independent, layered, and cross-lane workloads. It defaults to
+10 repetitions per configuration. `--pinning` compares virtual threads
+blocked inside `synchronized` and `ReentrantLock` regions and reports the JDK
+version using a configured four-carrier virtual-thread scheduler; JDK 24 and
+later substantially reduce monitor-related carrier pinning.
 
 ## Design
 
@@ -72,9 +85,41 @@ contract can occupy its worker until it returns.
 - **MLFQ:** has three queues, demotes tasks after each yielded slice, uses a
   different suggested budget per level, and periodically boosts priorities to
   prevent starvation.
+- **Critical path:** among currently ready tasks, dispatches the task with the
+  greatest estimated remaining path length (its burst estimate plus the
+  longest dependent path). FCFS arrival order breaks ties. This is most useful
+  for workloads with a few long dependency chains.
 
 Dependencies sit above the scheduler: policies only receive tasks that are
 already ready.
+
+### Hybrid platform/virtual execution
+
+Set the final `blocking` component of a `TaskSpec` to `true` to route that task
+to a named virtual thread. Existing platform workers continue to run
+non-blocking tasks and cooperatively yielded slices. Virtual-lane work runs
+through its slices to completion and shares the dependency, completion, and
+failure-propagation path. Virtual concurrency defaults to 100 and can be
+configured with the `ThreadPoolManager` constructor that accepts a virtual
+task limit.
+
+The opt-in `LaneClassifier` setting samples platform task slices by work
+implementation type. After five samples, a mean CPU/wall ratio below 0.20
+routes later tasks of that type to virtual threads. Automatic classification
+is disabled by default. Scheduler quanta and cooperative requeue behavior
+apply to the platform lane; virtual tasks run to completion. The semaphore
+limits concurrently executing virtual task bodies, while virtual threads
+waiting for a permit are still created. A virtual-only benchmark still uses
+the pool's platform worker as a dispatcher.
+
+### Randomized DAG and per-lane metrics
+
+`RandomDagFactory` creates reproducible acyclic graphs by permitting edges only
+from earlier to later task IDs. `ScalingStudy` reports mean makespan, standard
+deviation, throughput, waiting time, and turnaround across repeated runs.
+`ScalingReport.writeCsv(Path)` exports rows for external graphing. The regular
+benchmark report includes platform and virtual task counts and per-lane average
+wait and turnaround values.
 
 ## Benchmark metrics
 
@@ -87,18 +132,18 @@ state reuse between runs. Results are measurements of the included small
 synthetic workload; timings vary with machine load and are not general claims
 that one policy is universally faster.
 
-One run of the nine-task demo measured approximately 136.9 tasks/sec for FCFS,
-125.8 for priority with aging, 142.0 for Round Robin, and 154.7 for MLFQ.
-Because this is a tiny synthetic workload, use the live output from
-`mvn exec:java` for current measurements rather than treating these sample
-figures as a reliable ranking.
+The nine-task demo is too small to produce a reliable policy ranking; use the
+live output from `mvn exec:java` rather than treating sample timings as
+general performance claims.
 
 ## Project map
 
 ```text
 src/main/java/edu/oslab/threadpool/
-  benchmark/       comparison harness and report formatter
-  scheduler/       FCFS, priority, Round Robin, and MLFQ policies
+  benchmark/       comparison harness, scaling study, and mixed workload
+  classifier/      optional sampled lane classifier
+  experiment/      carrier blocking experiment
+  scheduler/       FCFS, priority, Round Robin, MLFQ, and critical path
   DependencyGraph.java
   CycleDetector.java
   ThreadPoolManager.java
@@ -111,5 +156,6 @@ src/test/java/     concurrency, dependency, cycle, and policy tests
 
 The implementation is in-memory and single-JVM. It does not use
 `ExecutorService`, `Executors`, a third-party graph library, persistence, or
-distributed coordination. The thread pool manages platform threads; virtual
-threads are intentionally not substituted for the hand-built core.
+distributed coordination. The hand-built pool owns platform worker threads;
+virtual threads are started directly for tasks explicitly or automatically
+classified as blocking.
