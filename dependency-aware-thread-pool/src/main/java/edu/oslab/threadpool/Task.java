@@ -1,0 +1,70 @@
+package edu.oslab.threadpool;
+
+import java.util.Objects;
+
+public final class Task {
+    private final TaskSpec spec;
+    private volatile TaskState state = TaskState.PENDING;
+    private long submittedNanos;
+    private long firstDispatchNanos;
+    private long terminalNanos;
+    private int slicesRun;
+    private String failureMessage;
+
+    public Task(TaskSpec spec) {
+        this.spec = Objects.requireNonNull(spec, "spec");
+    }
+
+    public String id() {
+        return spec.id();
+    }
+
+    public TaskSpec spec() {
+        return spec;
+    }
+
+    public TaskState state() {
+        return state;
+    }
+
+    public synchronized void markSubmitted(long atNanos) {
+        if (submittedNanos != 0 || state != TaskState.PENDING) {
+            throw new IllegalStateException("Task has already been submitted: " + id());
+        }
+        submittedNanos = atNanos;
+    }
+
+    public synchronized void transitionTo(TaskState next, long atNanos, String failure) {
+        Objects.requireNonNull(next, "next");
+        boolean allowed = switch (state) {
+            case PENDING -> next == TaskState.READY || next == TaskState.FAILED;
+            case READY -> next == TaskState.RUNNING || next == TaskState.FAILED;
+            case RUNNING -> next == TaskState.READY || next == TaskState.DONE || next == TaskState.FAILED;
+            case DONE, FAILED -> false;
+        };
+        if (!allowed) {
+            throw new IllegalStateException("Invalid task transition for " + id() + ": " + state + " -> " + next);
+        }
+        if (next == TaskState.RUNNING && firstDispatchNanos == 0) {
+            firstDispatchNanos = atNanos;
+        }
+        if (next.isTerminal()) {
+            terminalNanos = atNanos;
+        }
+        state = next;
+        failureMessage = failure;
+    }
+
+    public synchronized void recordSlice() {
+        slicesRun++;
+    }
+
+    public synchronized TaskMetrics metrics() {
+        return new TaskMetrics(
+                id(), state, submittedNanos, firstDispatchNanos, terminalNanos, slicesRun, failureMessage);
+    }
+
+    public synchronized String failureMessageForPool() {
+        return failureMessage;
+    }
+}

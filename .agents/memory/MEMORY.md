@@ -1,0 +1,1 @@
+- [Java 25 toolchain](java-25-toolchain.md) — Maven may use an older JDK by default; select Java 25 explicitly for release-25 builds.
