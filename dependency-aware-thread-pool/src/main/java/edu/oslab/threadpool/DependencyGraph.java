@@ -122,4 +122,21 @@ public final class DependencyGraph {
         }
         return List.copyOf(order);
     }
+
+    public Map<String, Long> computeCriticalPathWeights(Map<String, Long> estimatedBurstMillis) {
+        if (!estimatedBurstMillis.keySet().containsAll(dependencies.keySet())) {
+            throw new IllegalArgumentException("Burst estimates are missing for registered tasks");
+        }
+        List<String> order = topologicalOrder();
+        Map<String, Long> weights = new LinkedHashMap<>();
+        for (int index = order.size() - 1; index >= 0; index--) {
+            String id = order.get(index);
+            long longestDependentPath = dependents.getOrDefault(id, Set.of()).stream()
+                    .mapToLong(dependent -> weights.getOrDefault(dependent, 0L))
+                    .max()
+                    .orElse(0);
+            weights.put(id, Math.addExact(estimatedBurstMillis.get(id), longestDependentPath));
+        }
+        return Map.copyOf(weights);
+    }
 }

@@ -5,6 +5,8 @@ import java.util.Objects;
 public final class Task {
     private final TaskSpec spec;
     private volatile TaskState state = TaskState.PENDING;
+    private volatile Lane lane = Lane.PLATFORM;
+    private volatile long criticalPathWeight;
     private long submittedNanos;
     private long firstDispatchNanos;
     private long terminalNanos;
@@ -25,6 +27,22 @@ public final class Task {
 
     public TaskState state() {
         return state;
+    }
+
+    public synchronized void markDispatched(Lane lane) {
+        this.lane = Objects.requireNonNull(lane, "lane");
+    }
+
+    public synchronized Lane lane() {
+        return lane;
+    }
+
+    public long criticalPathWeight() {
+        return criticalPathWeight;
+    }
+
+    synchronized void setCriticalPathWeight(long weight) {
+        criticalPathWeight = weight;
     }
 
     public synchronized void markSubmitted(long atNanos) {
@@ -61,7 +79,7 @@ public final class Task {
 
     public synchronized TaskMetrics metrics() {
         return new TaskMetrics(
-                id(), state, submittedNanos, firstDispatchNanos, terminalNanos, slicesRun, failureMessage);
+                id(), state, submittedNanos, firstDispatchNanos, terminalNanos, slicesRun, failureMessage, lane);
     }
 
     public synchronized String failureMessageForPool() {

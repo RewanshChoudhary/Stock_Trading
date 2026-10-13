@@ -21,6 +21,10 @@ final class WorkerThread extends Thread {
                     return;
                 }
 
+                if (pool.dispatchVirtual(task)) {
+                    continue;
+                }
+                task.markDispatched(Lane.PLATFORM);
                 LOGGER.debug("Dispatching task {}", task.id());
                 try {
                     SliceResult result = task.spec().work().runSlice(

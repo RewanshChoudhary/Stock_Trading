@@ -1,6 +1,7 @@
 package edu.oslab.threadpool.benchmark;
 
 import edu.oslab.threadpool.TaskMetrics;
+import edu.oslab.threadpool.Lane;
 import edu.oslab.threadpool.ThreadPoolManager;
 import edu.oslab.threadpool.scheduler.SchedulerPolicy;
 
@@ -69,14 +70,33 @@ public final class BenchmarkHarness {
                     .mapToLong(TaskMetrics::turnaroundTimeNanos)
                     .average()
                     .orElse(0) / 1_000_000.0;
+            List<TaskMetrics> platformMetrics = taskMetrics.stream()
+                    .filter(metrics -> metrics.lane() == Lane.PLATFORM)
+                    .toList();
+            List<TaskMetrics> virtualMetrics = taskMetrics.stream()
+                    .filter(metrics -> metrics.lane() == Lane.VIRTUAL)
+                    .toList();
             results.add(new BenchmarkResult(
                     policy.name(),
                     taskMetrics.size(),
                     elapsedSeconds,
                     taskMetrics.size() / elapsedSeconds,
                     averageWaitingMillis,
-                    averageTurnaroundMillis));
+                    averageTurnaroundMillis,
+                    platformMetrics.size(),
+                    virtualMetrics.size(),
+                    averageMillis(platformMetrics, true),
+                    averageMillis(virtualMetrics, true),
+                    averageMillis(platformMetrics, false),
+                    averageMillis(virtualMetrics, false)));
         }
         return List.copyOf(results);
+    }
+
+    private static double averageMillis(List<TaskMetrics> metrics, boolean waiting) {
+        return metrics.stream()
+                .mapToLong(waiting ? TaskMetrics::waitingTimeNanos : TaskMetrics::turnaroundTimeNanos)
+                .average()
+                .orElse(0) / 1_000_000.0;
     }
 }

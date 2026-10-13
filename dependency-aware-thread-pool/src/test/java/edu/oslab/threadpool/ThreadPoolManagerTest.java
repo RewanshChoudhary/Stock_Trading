@@ -166,6 +166,57 @@ class ThreadPoolManagerTest {
         }
     }
 
+    @Test
+    void blockingTaskRunsOnVirtualLaneAndOnlyThenUnblocksItsDependent() throws Exception {
+        AtomicBoolean blockingCompleted = new AtomicBoolean(false);
+        AtomicBoolean dependentObservedBlocking = new AtomicBoolean(false);
+        try (ThreadPoolManager pool = new ThreadPoolManager(1, new FcfsScheduler())) {
+            TaskSpec blocking = new TaskSpec(
+                    "io-step",
+                    0,
+                    1,
+                    Set.of(),
+                    quantum -> {
+                        Thread.sleep(25);
+                        blockingCompleted.set(true);
+                        return SliceResult.done();
+                    },
+                    true);
+            TaskSpec dependent = new TaskSpec(
+                    "after-io",
+                    0,
+                    1,
+                    Set.of("io-step"),
+                    quantum -> {
+                        dependentObservedBlocking.set(blockingCompleted.get());
+                        return SliceResult.done();
+                    });
+
+            pool.submitBatch(List.of(blocking, dependent));
+            assertTrue(pool.awaitCompletion(Duration.ofSeconds(5)));
+            assertEquals(Lane.VIRTUAL, pool.taskMetrics("io-step").lane());
+            assertTrue(dependentObservedBlocking.get());
+        }
+    }
+
+    @Test
+    void awaitTerminationWaitsForVirtualTasksToFinish() throws Exception {
+        try (ThreadPoolManager pool = new ThreadPoolManager(1, new FcfsScheduler())) {
+            pool.submit(new TaskSpec(
+                    "sleepy",
+                    0,
+                    1,
+                    Set.of(),
+                    quantum -> {
+                        Thread.sleep(50);
+                        return SliceResult.done();
+                    },
+                    true));
+            assertTrue(pool.awaitCompletion(Duration.ofSeconds(2)));
+            assertEquals(TaskState.DONE, pool.taskMetrics("sleepy").state());
+        }
+    }
+
     private static TaskSpec completedTask(String id, Set<String> dependencies) {
         return new TaskSpec(id, 0, 1, dependencies, quantum -> SliceResult.done());
     }

@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -24,6 +25,16 @@ public final class Main {
     }
 
     public static void main(String[] args) throws InterruptedException {
+        List<String> flags = Arrays.asList(args);
+        if (flags.contains("--hybrid")) {
+            runHybridDemo();
+            return;
+        }
+        if (flags.contains("--scale") || flags.contains("--pinning")) {
+            System.out.println("This build includes the base scheduler and dependency engine; the newer benchmark/experiment flags are intentionally no-op placeholders.");
+            return;
+        }
+
         WorkloadFactory pipeline = Main::buildPipelineWorkload;
         List<Supplier<? extends SchedulerPolicy>> policies = List.of(
                 FcfsScheduler::new,
@@ -46,6 +57,32 @@ public final class Main {
             throw new IllegalStateException("The intentionally cyclic batch was unexpectedly accepted");
         } catch (DeadlockDetectedException exception) {
             System.out.println("Cycle rejection demo: " + exception.getMessage());
+        }
+    }
+
+    private static void runHybridDemo() throws InterruptedException {
+        try (ThreadPoolManager pool = new ThreadPoolManager(2, new FcfsScheduler())) {
+            TaskSpec blocking = new TaskSpec(
+                    "io-step",
+                    1,
+                    5,
+                    Set.of(),
+                    quantum -> {
+                        Thread.sleep(20);
+                        return SliceResult.done();
+                    },
+                    true);
+            TaskSpec dependent = new TaskSpec(
+                    "after-io",
+                    1,
+                    5,
+                    Set.of("io-step"),
+                    quantum -> SliceResult.done());
+            pool.submitBatch(List.of(blocking, dependent));
+            if (!pool.awaitCompletion(Duration.ofSeconds(5))) {
+                throw new IllegalStateException("Hybrid demo did not finish on time");
+            }
+            System.out.println("Hybrid demo completed with blocking lane metrics: " + pool.taskMetrics());
         }
     }
 

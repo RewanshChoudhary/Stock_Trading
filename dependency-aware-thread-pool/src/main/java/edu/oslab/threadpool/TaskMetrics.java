@@ -7,7 +7,19 @@ public record TaskMetrics(
         long firstDispatchNanos,
         long terminalNanos,
         int slicesRun,
-        String failureMessage) {
+        String failureMessage,
+        Lane lane) {
+
+    public TaskMetrics(
+            String id,
+            TaskState state,
+            long submittedNanos,
+            long firstDispatchNanos,
+            long terminalNanos,
+            int slicesRun,
+            String failureMessage) {
+        this(id, state, submittedNanos, firstDispatchNanos, terminalNanos, slicesRun, failureMessage, Lane.PLATFORM);
+    }
 
     public long waitingTimeNanos() {
         return firstDispatchNanos == 0 ? 0 : firstDispatchNanos - submittedNanos;

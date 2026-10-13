@@ -20,6 +20,7 @@ public final class ThreadPoolManager implements AutoCloseable {
     private final Condition stateChanged = lock.newCondition();
     private final SchedulerPolicy scheduler;
     private final DependencyGraph dependencyGraph = new DependencyGraph();
+    private final Dispatcher dispatcher;
     private final Map<String, Task> tasks = new LinkedHashMap<>();
     private final Set<WorkerThread> workers = new LinkedHashSet<>();
     private final int minWorkerCount;
@@ -47,6 +48,16 @@ public final class ThreadPoolManager implements AutoCloseable {
             int maxWorkerCount,
             SchedulerPolicy scheduler,
             Duration idleShrinkDelay) {
+        this(initialWorkerCount, minWorkerCount, maxWorkerCount, scheduler, idleShrinkDelay, 100);
+    }
+
+    public ThreadPoolManager(
+            int initialWorkerCount,
+            int minWorkerCount,
+            int maxWorkerCount,
+            SchedulerPolicy scheduler,
+            Duration idleShrinkDelay,
+            int maxVirtualTasks) {
         if (minWorkerCount < 1 || initialWorkerCount < minWorkerCount || maxWorkerCount < initialWorkerCount) {
             throw new IllegalArgumentException("Worker counts must satisfy 1 <= min <= initial <= max");
         }
@@ -55,6 +66,7 @@ public final class ThreadPoolManager implements AutoCloseable {
             throw new IllegalArgumentException("Idle shrink delay must be positive");
         }
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+        this.dispatcher = new Dispatcher(this, maxVirtualTasks);
         this.minWorkerCount = minWorkerCount;
         this.maxWorkerCount = maxWorkerCount;
         this.idleShrinkDelay = idleShrinkDelay;
@@ -95,6 +107,10 @@ public final class ThreadPoolManager implements AutoCloseable {
                 tasks.put(task.id(), task);
                 submitted.add(task);
             }
+            Map<String, Long> burstEstimates = new LinkedHashMap<>();
+            tasks.forEach((id, task) -> burstEstimates.put(id, task.spec().estimatedBurstMillis()));
+            dependencyGraph.computeCriticalPathWeights(burstEstimates)
+                    .forEach((id, weight) -> tasks.get(id).setCriticalPathWeight(weight));
             for (String id : readyIds) {
                 makeReadyLocked(tasks.get(id), now);
             }
@@ -146,7 +162,7 @@ public final class ThreadPoolManager implements AutoCloseable {
         long remaining = timeout.toNanos();
         lock.lockInterruptibly();
         try {
-            while (!workers.isEmpty()) {
+            while (!workers.isEmpty() || dispatcher.virtualInFlight() > 0) {
                 if (remaining <= 0) {
                     return false;
                 }
@@ -225,6 +241,10 @@ public final class ThreadPoolManager implements AutoCloseable {
                     return null;
                 }
 
+                boolean dispatchVirtual(Task task) {
+                    return dispatcher.dispatch(task);
+                }
+
                 long now = System.nanoTime();
                 if (!shutdownRequested
                         && workers.size() > minWorkerCount
@@ -270,10 +290,24 @@ public final class ThreadPoolManager implements AutoCloseable {
         }
     }
 
+    void signalShutdownIfDone() {
+        lock.lock();
+        try {
+            if (shutdownRequested && workers.isEmpty() && dispatcher.virtualInFlight() == 0 && allTasksTerminalLocked()) {
+                stateChanged.signalAll();
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
     void workerStopped(WorkerThread worker) {
         lock.lock();
         try {
             workers.remove(worker);
+            if (!shutdownRequested && workers.size() < minWorkerCount) {
+                startWorkerLocked();
+            }
             stateChanged.signalAll();
             workAvailable.signalAll();
         } finally {
@@ -307,7 +341,10 @@ public final class ThreadPoolManager implements AutoCloseable {
     }
 
     private void scaleUpForQueueLocked() {
-        while (workers.size() < maxWorkerCount && scheduler.readyCount() > workers.size() * 2) {
+        long platformReady = tasks.values().stream()
+                .filter(ready -> ready.state() == TaskState.READY && !ready.spec().blocking())
+                .count();
+        while (workers.size() < maxWorkerCount && platformReady > workers.size() * 2L) {
             startWorkerLocked();
         }
     }

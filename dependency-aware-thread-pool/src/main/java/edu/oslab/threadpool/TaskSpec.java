@@ -10,7 +10,17 @@ public record TaskSpec(
         int priority,
         long estimatedBurstMillis,
         Set<String> dependencies,
-        CooperativeWork work) {
+        CooperativeWork work,
+        boolean blocking) {
+
+    public TaskSpec(
+            String id,
+            int priority,
+            long estimatedBurstMillis,
+            Set<String> dependencies,
+            CooperativeWork work) {
+        this(id, priority, estimatedBurstMillis, dependencies, work, false);
+    }
 
     public TaskSpec {
         id = Objects.requireNonNull(id, "id").trim();
