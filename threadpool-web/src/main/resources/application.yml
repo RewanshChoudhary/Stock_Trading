@@ -1,0 +1,26 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: dependency-aware-thread-pool-web
+  threads:
+    virtual:
+      enabled: true   # Tomcat request handling only; pool workers are still manual platform threads
+
+threadpool:
+  limits:
+    max-concurrent-runs: 5
+    max-tasks-per-run: 500
+    max-total-tasks: 2000
+    max-workers-per-run: 16
+    run-retention-seconds: 300
+  sse:
+    queue-capacity: 1024
+    heartbeat-seconds: 15
+
+logging:
+  level:
+    edu.oslab.threadpool: INFO

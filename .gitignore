@@ -1,5 +1,6 @@
 # Build output
 target/
+threadpool-web/src/main/resources/static/
 *.class
 
 # IDEs and editors
@@ -24,3 +25,4 @@ replay_pid*
 # System files
 .DS_Store
 Thumbs.db
+.freebuff/

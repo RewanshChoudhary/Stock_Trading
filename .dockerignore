@@ -1,0 +1,7 @@
+.git
+.gitignore
+.idea
+.vscode
+**/target
+**/node_modules
+threadpool-web/src/main/resources/static

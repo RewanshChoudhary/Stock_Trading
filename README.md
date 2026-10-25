@@ -1,123 +1,282 @@
-Dependency-Aware Thread Pool with Adaptive Task Scheduling — Implementation Plan
+# Dependency-Aware Thread Pool
 
-1. Project Overview
-This project implements a custom, from-scratch thread pool in Java that goes beyond a standard fixed-worker-pool exercise in two ways: tasks can declare dependencies on other tasks (forming a Directed Acyclic Graph, or DAG), and the system performs deadlock detection on that dependency graph before execution begins. On top of this, the pool supports four scheduling policies — FCFS, Priority (with aging), Round Robin, and an adaptive Multilevel Feedback Queue (MLFQ) — and includes a benchmarking module to compare them empirically.
-This document lays out the architecture, module breakdown, phased development plan, recommended dependencies, guidance on scoping the novel pieces sensibly, useful references, and a ready-to-use prompt for handing this spec to an AI coding agent.
-2. Architecture
-The system is organized into five layers, with data flowing top to bottom from task submission to execution:
- ┌───────────────────────────────┐
- │      Demo / CLI Client         │   submits tasks + dependency IDs
- └───────────────┬───────────────┘
-                 │ submit(task, deps[])
- ┌───────────────▼───────────────┐
- │   Dependency Manager (DAG)     │
- │  - adjacency-list graph        │
- │  - DFS cycle detector          │
- │  - computes "ready" tasks      │
- └───────────────┬───────────────┘
-                 │ ready tasks only
- ┌───────────────▼───────────────┐
- │   Scheduler (pluggable policy) │
- │  FCFS | Priority | RR | MLFQ   │
- └───────────────┬───────────────┘
-                 │ dispatch next task
- ┌───────────────▼───────────────┐
- │      Thread Pool Core          │
- │  fixed worker threads +        │
- │  shared queue, protected by    │
- │  ReentrantLock / Condition /   │
- │  Semaphore                     │
- └───────────────┬───────────────┘
-                 │ execute + report completion
- ┌───────────────▼───────────────┐
- │   Metrics & Benchmark Logger   │
- │  throughput, wait time,        │
- │  turnaround time per policy    │
- └───────────────────────────────┘
-The key architectural decision is that the Dependency Manager sits above the Scheduler: it never hands a task to the scheduler until all of that task's dependencies have completed. The scheduler itself has no knowledge of dependencies at all — it only ever sees a pool of "ready" tasks and decides which one runs next. This separation keeps each piece simple to implement, test, and explain individually.
-3. Core Components
-Component
-Responsibility
-ThreadPoolManager
-Owns the fixed set of WorkerThreads; handles pool startup, graceful shutdown, and dynamic resizing based on queue depth
-WorkerThread (extends Thread)
-Loops: pull next ready task from the scheduler, execute it, report completion back to the Dependency Manager
-Task
-Holds id, priority, estimated burst time, list of dependency task-IDs, and current state (PENDING, READY, RUNNING, DONE)
-SchedulerPolicy (interface)
-Implemented by FcfsScheduler, PriorityScheduler (with aging), RoundRobinScheduler, MlfqScheduler
-DependencyGraph
-Adjacency-list representation; addTask(), markComplete(), getReadyTasks()
-CycleDetector
-DFS with white/gray/black node marking; runs once at graph-build time to reject circular dependency sets before any task starts
-BenchmarkHarness
-Wraps a full run under one policy; records submit/start/finish timestamps per task; computes throughput, average wait time, turnaround time
-MetricsReporter
-Prints or exports a comparison table across all four policies
-4. Development Plan (phased)
-Phase 1 — target for Review 1
-• Core thread pool: worker thread lifecycle, graceful shutdown
-• Shared task queue synchronized with ReentrantLock + Condition
-• FCFS policy, working end-to-end (submit → dispatch → execute)
-• Baseline JUnit tests proving thread-safety: no lost tasks, no duplicate execution, no race conditions under concurrent submission
-Phase 2 — target for Review 2
-• Priority (with aging), Round Robin, and MLFQ policies
-• Dependency graph with topological "ready" computation
-• Cycle detector and the rejection path for invalid task sets
-• Dynamic pool resizing based on queue depth
-• Benchmark harness and the four-policy comparison report
-• Final test suite, README, and a simple CLI demo client
-5. Recommended Dependencies
-• Java 17+ — use records for the immutable Task metrics snapshot, and pattern matching (switch on sealed state) for clean state handling
-• Maven (pom.xml) for build and dependency management
-• JUnit 5 (org.junit.jupiter) for unit and concurrency tests
-• SLF4J + Logback (optional but recommended) — structured, thread-tagged logging is far easier to debug than scattered println calls when diagnosing interleaving bugs
-• No external graph library — implement the DAG and cycle detector by hand with a plain adjacency list. A library like JGraphT would work, but hand-rolling it is small (under ~150 lines) and much easier to defend in a viva, since it directly demonstrates your own understanding of the algorithm
-• JMH (Java Microbenchmark Harness) — optional, only worth adding if your evaluator specifically wants rigorous statistical benchmarking; a System.nanoTime()-based custom harness is sufficient and simpler to explain for a course project
-6. Novel Idea Guidance (keeping it well-scoped)
-The dependency-graph and deadlock-detection pieces are what make this project stand out, but they're also the easiest part to over-build. A few scoping choices that keep it demonstrable without turning into a research project:
-• Dependencies are explicit, not inferred. A task lists the exact IDs it depends on at submission time. Don't try to auto-detect dependencies from shared data — that's a much bigger problem (static/dynamic data-flow analysis) and out of scope.
-• Cycle detection runs once, at graph-build time — not repeatedly during scheduling. This keeps the algorithm simple (a single DFS pass) and keeps its cost out of the scheduling hot path.
-• Keep MLFQ to three priority levels. Classic MLFQ designs can have many tiers with complex rules; three levels (high/medium/low) with a simple demotion-on-timeout and periodic priority boost is enough to demonstrate the concept clearly and is much easier to explain in a viva.
-• Design one clear demo scenario rather than random generated graphs: e.g., a small "build pipeline" of 8–10 tasks representing something intuitive (compile → test → package → deploy style dependencies), with one or two tasks deliberately given a circular dependency so you can demonstrate the rejection path live. A relatable, visualizable scenario is more convincing to evaluators than an abstract stress test.
-• Resist adding distributed or persistence features. Everything stays in-memory and single-JVM — that's already stated in your Scope section, and it's the right boundary for the timeframe you have.
-7. Useful References
-• Operating Systems: Three Easy Pieces (OSTEP) — free online textbook; the scheduling section's MLFQ chapter is the clearest available explanation of multilevel feedback queues and directly informs the demotion/promotion rules
-• Silberschatz, Galvin & Gagne, Operating System Concepts — chapters on CPU Scheduling, Process Synchronization, and Deadlocks (for the detection-vs-avoidance-vs-prevention distinction)
-• Oracle's official Java Concurrency tutorial (docs.oracle.com) — canonical usage patterns for ReentrantLock, Condition, and Semaphore
-• CLRS (Introduction to Algorithms), Chapter 22 — the standard reference for DFS-based topological sort and cycle detection
-• OpenJDK source for java.util.concurrent (e.g. ThreadPoolExecutor, AbstractQueuedSynchronizer) — useful to read for inspiration on real-world design patterns, but should not be copied; the point of this project is demonstrating the mechanics yourself
-• Baeldung / GeeksforGeeks articles on "Producer-Consumer in Java" and "Topological Sort" — good as quick refreshers while implementing, not as a primary source
-8. No-Code Prompt (for an AI coding agent)
-The block below is self-contained and can be pasted directly into an AI coding assistant (e.g. Claude Code) to generate the implementation from scratch.
-Build a Java 17+ Maven project called "dependency-aware-thread-pool" that implements a custom thread pool with dependency-aware task scheduling. Do NOT use java.util.concurrent.ExecutorService, Executors, or any pre-built thread pool — the entire point is to implement thread management manually using Thread, ReentrantLock, Condition, and Semaphore from java.util.concurrent.locks and java.util.concurrent, so the low-level mechanics are visible.
+An operating-systems project that implements a dependency-aware task pool in Java and makes its behavior visible through a browser-based simulator. It combines explicit task-graph management, hand-managed platform workers, cooperative scheduling, virtual-thread execution for blocking work, several ready-queue policies, and an event-streaming Spring Boot interface.
 
-Requirements:
+The repository is organized as a Maven reactor with two Java modules. `threadpool-core` contains the pool and benchmark code without a Spring dependency. `threadpool-web` exposes the engine through REST and Server-Sent Events (SSE) and serves the frontend built from `threadpool-core/frontend/`.
 
-1. Task model: a Task has an id, priority (int), estimated burst time (ms), a list of dependency task-IDs, and a state (PENDING, READY, RUNNING, DONE).
+## Problem statement
 
-2. Thread pool core: a fixed-size pool of worker threads (extending Thread) that pull the next ready task from a shared, lock-protected queue and execute it. Use ReentrantLock + Condition for queue synchronization (no busy-waiting). Support graceful shutdown. Support dynamic resizing of the worker count based on queue depth (grow when queue depth exceeds a threshold, shrink when idle).
+Many programs are pipelines or workflows rather than collections of independent jobs. A task may only run after one or more prerequisites have completed. Examples include compiling a module after its dependencies, processing an image after its source has been fetched, or running a report after several data jobs finish.
 
-3. Dependency graph: implement a DependencyGraph class using a plain adjacency list (no external graph library). Tasks are submitted with their dependency IDs. A task only becomes READY once all its dependencies report DONE. Before accepting a batch of tasks, run a DFS-based cycle detector (white/gray/black marking) over the dependency graph; if a cycle is found, reject the whole submission with a clear DeadlockDetectedException listing the cycle.
+A conventional ready queue represents only *which task should run next*. It does not by itself represent *which tasks are allowed to run*. Placing every submitted task directly in the queue can violate prerequisites. Having workers wait inside task code for prerequisites wastes worker capacity and complicates deadlock handling. A failure can also leave downstream tasks waiting forever unless the system defines what happens to dependents.
 
-4. Scheduling policies: implement a SchedulerPolicy interface with four implementations: FcfsScheduler, PriorityScheduler (with priority aging so long-waiting low-priority tasks eventually get promoted), RoundRobinScheduler (fixed time quantum), and MlfqScheduler (3 priority levels, demote a task on timeout, periodically boost all tasks back to the top level to prevent starvation). The scheduler should be pluggable — the thread pool should work identically regardless of which policy is active.
+This project addresses those coordination problems in one in-memory JVM:
 
-5. Benchmarking: implement a BenchmarkHarness that runs an identical workload under each of the four policies and records submit time, dispatch time, and completion time per task, then computes throughput (tasks/sec), average waiting time, and average turnaround time. Output a comparison table across all four policies.
+1. Accept a batch of tasks and validate its IDs and dependency references.
+2. Reject dependency cycles before registering any part of the batch.
+3. Keep tasks with unresolved prerequisites out of the scheduler.
+4. Move tasks into the ready queue only when their prerequisites have completed.
+5. Select ready work using a pluggable scheduling policy and execute it on an appropriate lane.
+6. Record completion, failure, cancellation, metrics, and events so the run can be inspected.
 
-6. Demo: include a small CLI demo (Main class) that defines an 8-10 task "build pipeline"-style workload with realistic dependencies (e.g. compile -> test -> package -> deploy), runs it successfully, and then runs a second workload that deliberately contains a circular dependency to demonstrate the DeadlockDetectedException path.
+The central separation is that **the dependency manager decides whether a task is ready; the scheduler decides which ready task runs next**. A scheduling policy never has to inspect or reinterpret the graph.
 
-7. Tests: write JUnit 5 tests covering (a) thread-safety of the core pool under concurrent submission (no lost or duplicated task execution), (b) correct dependency resolution ordering, (c) correct rejection of cyclic dependency graphs, and (d) correctness of each scheduling policy's ordering logic under a controlled task set.
+## The idea and project contribution
 
-8. Logging: use SLF4J + Logback with thread-name-tagged log output so execution interleaving is visible and debuggable.
+The project does not claim to invent a new scheduling algorithm. FCFS, priority scheduling, Round Robin, multilevel feedback queues, and critical-path prioritization are established ideas. The project’s contribution is an integrated, inspectable implementation that puts these ideas together under explicit operating-systems constraints:
 
-9. Keep the implementation scoped to a single JVM, in-memory only — no networking, no persistence, no distributed coordination.
+- **Graph-aware release with interchangeable scheduling.** Dependency resolution is performed before scheduling, so each policy sees the same valid ready tasks. This makes comparisons between policies easier to understand.
+- **Manual platform-thread management.** The pool owns `WorkerThread` instances and coordinates them with a `ReentrantLock` and `Condition`; a prebuilt executor does not dispatch pool work.
+- **Cooperative preemption points.** Since Java cannot safely stop arbitrary platform-thread code at a time quantum, work returns `yielded` or `done` at defined slice boundaries. Policies can reorder a yielded task at those boundaries.
+- **A hybrid execution model.** CPU-oriented tasks use the platform-worker lane, while tasks marked as blocking can run on directly started virtual threads, subject to a concurrency limit.
+- **Failure propagation through the graph.** If a task fails, transitive dependents are failed instead of being left permanently blocked behind an impossible prerequisite.
+- **Observable execution.** The web interface streams real pool events, supports event replay for reconnecting clients, and exposes task and run metrics. A separate headless comparison path avoids measuring the browser and event-stream overhead as scheduler time.
 
-Deliver: full Maven project structure, all source files, the JUnit test suite, a README explaining how to build/run the demo and the benchmark, and a short results summary comparing the four scheduling policies on the sample workload.
-9. Extension Idea: Comparing Against Java Virtual Threads
-Java Virtual Threads (finalized as a standard feature in JDK 21 under JEP 444) are a genuinely strong fit for this project's OS theme — not just a trendy library to name-drop. Unlike the platform threads this project builds its pool from, virtual threads are not backed one-to-one by an OS kernel thread. Instead, the JVM multiplexes many thousands of virtual threads onto a small pool of OS "carrier" threads, scheduling and parking them in user space. This is a direct, real-world instance of the many-to-many (M:N) threading model and the user-level vs. kernel-level threads distinction from OS coursework, so it connects cleanly to material you're already covering rather than being an unrelated add-on.
-Suggested extension (keep it secondary, not a replacement): add an optional second execution mode to the benchmark harness that runs the identical workload using Thread.ofVirtual().start(...) instead of the custom platform-thread pool. Use an I/O-bound synthetic workload (tasks that call Thread.sleep() to simulate blocking I/O) rather than a CPU-bound one — this is where the difference is dramatic and easy to explain: the custom platform-thread pool needs one OS thread per concurrently blocked task, while virtual threads release their carrier thread while parked, so thousands of blocked tasks cost almost nothing. Report this as a third comparison column (platform-thread custom pool vs. the four scheduling policies vs. virtual threads) in the same benchmark table from Section 4.
-Important scoping note: this should stay clearly labeled as a reference comparison, not folded into the core deliverable. The entire point of the hand-built thread pool is to demonstrate manual, OS-level thread management yourself — the same reason ExecutorService was ruled out earlier in this plan. Virtual threads abstract that mechanics away by design, so they're valuable here as a contrast that shows you understand both models, not as a substitute implementation.
-Version note: this extension requires JDK 21+, one step above the JDK 17+ baseline used for the core project. If you add this, bump the project's JDK version accordingly (JDK 21 and 24 are both current LTS releases, so either works).
-Reference: JEP 444 ("Virtual Threads"), openjdk.org — the authoritative source for the design rationale and the M:N scheduling model.
-If using the No-Code Prompt in Section 8, you can hand the agent this optional add-on separately once the core is done:
-(Optional extension) Add a third execution mode to the BenchmarkHarness that runs the same I/O-bound workload using Thread.ofVirtual().start() (JDK 21+) instead of the custom pool, and add its throughput/wait-time/turnaround results as an extra column in the comparison report. Clearly label this mode as a reference comparison against the custom implementation, not a replacement for it.
+Together these elements make the project useful as a teaching and experimentation tool: a learner can connect graph algorithms, lifecycle synchronization, thread behavior, and scheduling policy to visible run traces. The implementation is a focused educational project, not a production workflow engine or a claim that one policy is universally faster.
+
+## Scope
+
+### Included
+
+- A single-JVM, in-memory task pool with explicit task IDs and dependency edges.
+- Finite batches of tasks. Dependencies may refer to tasks in the same batch or tasks already registered in the pool; references to unknown or future tasks are rejected.
+- Atomic batch validation for duplicate IDs, unknown dependencies, and cycles.
+- Task states `PENDING`, `READY`, `RUNNING`, `DONE`, and `FAILED`.
+- Five scheduler policies: FCFS, priority with aging, Round Robin, three-level MLFQ, and critical-path priority.
+- Manually managed platform workers and cooperative task slices.
+- Optional blocking-task execution on virtual threads, with a semaphore limiting concurrent virtual task bodies.
+- Optional sampling-based lane classification for platform work. It is disabled by default.
+- Failure injection, cancellation, descendant failure propagation, task timing metrics, benchmark workloads, and event reporting.
+- A Spring Boot API and browser interface for creating, observing, cancelling, and comparing runs.
+- Docker Compose support for building and running the web application and bundled frontend.
+
+### Outside the scope
+
+- Multi-process or distributed scheduling, cluster coordination, networking between workers, or inter-process communication.
+- Persistent storage. Run state and traces are held in memory and are lost when the application stops.
+- Authentication, authorization, tenant isolation, or a production security model.
+- Arbitrary user-provided executable code. Web runs are built from controlled task specifications and simulated work; the API does not accept code to execute.
+- Forced preemption of arbitrary Java code. A cooperative task must return from `runSlice` for the pool to observe a yield, cancellation, or injected failure boundary.
+- A third-party graph library or a prebuilt executor for dispatching core pool tasks.
+- A universal performance ranking. Benchmark results depend on the machine, workload, worker count, and system load.
+
+## Architecture at a glance
+
+```mermaid
+flowchart LR
+    Client[CLI or Web Client] --> Submit[Submit Task Batch]
+    Submit --> Validate[Validate IDs and Dependencies]
+    Validate --> Cycle[Detect Cycles]
+    Cycle --> Graph[Dependency Graph]
+    Graph -->|Unresolved count is zero| Ready[Ready Tasks]
+    Ready --> Scheduler[Scheduler Policy]
+    Scheduler --> Dispatch{Lane Dispatch}
+    Dispatch -->|CPU or default| Workers[Manual Platform Workers]
+    Dispatch -->|Marked blocking| Virtual[Bounded Virtual Threads]
+    Workers --> Slice[Run Cooperative Slice]
+    Virtual --> Slice
+    Slice -->|Yielded| Scheduler
+    Slice -->|Done| Graph
+    Slice -->|Failed| Descendants[Fail Transitive Dependents]
+    Graph -->|New prerequisite count reaches zero| Ready
+    Workers --> Events[Metrics and Pool Events]
+    Virtual --> Events
+    Events --> SSE[REST and SSE Web Layer]
+    SSE --> Client
+```
+
+The core dependency direction is one-way: the web module depends on the core module. The core has no Spring dependency and can be run from the command line or used independently.
+
+## Task lifecycle and dependency behavior
+
+Each submitted `TaskSpec` contains an ID, base priority, estimated burst duration, dependency IDs, a `CooperativeWork` implementation, and a blocking-work flag. The task specification is immutable; the runtime `Task` tracks state and measurements.
+
+```text
+PENDING ── prerequisites complete ──> READY ── dispatch ──> RUNNING ── done ──> DONE
+   │                                     │                    │
+   └─────────────────────────────────────┴────────────────────┴── failure/cancel ──> FAILED
+                                                              │
+                                                              └── yield ──> READY
+```
+
+`DependencyGraph` maintains both prerequisite and dependent adjacency lists. It validates the proposed graph before mutating the registered graph. `CycleDetector` uses depth-first white/gray/black marking and reports a cycle path. On successful completion, only direct dependents have their unresolved counts decremented; any task whose count reaches zero becomes ready. Workers do not occupy threads while waiting for prerequisites.
+
+When a running task fails, its transitive descendants are failed immediately. A cancelled run fails waiting tasks right away and marks running tasks failed when their current cooperative slice returns. Cancellation cannot interrupt arbitrary Java code safely, so a task that does not return from its slice can delay completion of cancellation.
+
+## Core modules and responsibilities
+
+### Maven reactor
+
+The root `pom.xml` defines the Java 25 compiler release and builds both modules together. Maven dependency direction is `threadpool-web` → `threadpool-core`; the core does not depend on Spring. The root build also makes the frontend available to the web module during packaging.
+
+### `threadpool-core`: pool engine and experiments
+
+This is the Spring-free implementation of the scheduling and dependency model.
+
+| Package or class | Responsibility |
+|---|---|
+| `TaskSpec`, `Task`, `TaskState`, `TaskMetrics` | Immutable input, runtime task state machine, lifecycle timestamps, selected lane, and timing data. |
+| `CooperativeWork`, `SliceResult`, `SimulatedWork` | Work contract and the result of a slice: yield for another turn or finish the task. |
+| `DependencyGraph`, `CycleDetector`, `DeadlockDetectedException` | Graph registration and validation, unresolved prerequisite counts, cycle detection, newly-ready release, descendant traversal, and critical-path weights. |
+| `ThreadPoolManager` | Pool lifecycle, submission, state transitions, worker synchronization, dispatch coordination, completion waits, failure propagation, cancellation, and listener notifications. |
+| `WorkerThread` | A manually managed platform worker that waits for work and runs platform-lane slices without holding the pool lock during task execution. |
+| `Dispatcher`, `Lane` | Routes work to the platform lane or starts a named virtual thread for blocking work; virtual task execution is bounded by a semaphore. |
+| `PoolEventListener` | Core event callback surface. The engine does not depend on the web event implementation. |
+| `scheduler/` | `SchedulerPolicy` and five ready-queue policy implementations. Each scheduler works with tasks already declared ready. |
+| `classifier/LaneClassifier` | Optional sampling of platform CPU time versus wall-clock time to classify work types for later virtual-lane execution. Disabled by default. |
+| `benchmark/` | Repeated policy comparisons, generated acyclic DAGs, mixed platform/virtual workloads, scaling summaries, CSV output, and formatted reports. |
+| `experiment/PinningExperiment` | Experiment comparing virtual-thread carrier behavior while blocked in monitor and lock regions. |
+| `Main` | CLI demonstrations and benchmark entry points. |
+
+### Scheduler policies
+
+The scheduler only orders the current ready set. Dependency release is handled separately.
+
+| Policy | How it chooses and requeues work |
+|---|---|
+| **FCFS** | Chooses in queue order. A yielded task is reinserted at the head to continue before later arrivals. |
+| **Priority with aging** | Chooses the highest effective priority. Waiting time adds a linear aging increment, with FIFO ordering as a tie-breaker. |
+| **Round Robin** | Chooses in queue order and appends a yielded task to the tail. |
+| **MLFQ** | Uses three priority levels with suggested quanta of 10, 25, and 50 ms. A task that yields is demoted; periodic boosts return tasks to the top level. |
+| **Critical path** | Chooses the ready task with the greatest estimated remaining path weight, derived from its estimated burst and longest dependent path. FIFO order breaks ties. |
+
+Quanta are cooperative budgets, not hard time limits. If task code runs past its budget without returning, the pool cannot take the worker away from that task.
+
+### Execution lanes
+
+- **Platform lane:** Tasks not classified as blocking run on `WorkerThread` instances. They execute one cooperative slice, then either finish or return to the scheduler according to the policy’s yield behavior.
+- **Virtual lane:** Tasks explicitly marked blocking, or selected by the opt-in classifier, run on directly started virtual threads. Virtual tasks are limited by a semaphore and execute their slices through completion. A virtual-only workload still uses platform workers to dispatch the tasks.
+- **Lane classifier:** Samples CPU and wall time for platform slices. After enough samples for a work type, a low mean CPU-to-wall ratio can classify later instances as virtual-lane work. CPU-time observation is performed on platform threads; automatic classification is off by default.
+
+### Benchmarks and measurements
+
+`BenchmarkHarness` obtains a fresh workload and scheduler for each policy run, waits for completion, and collects task metrics. The scaling tools use reproducible acyclic graphs and repeated runs. The benchmark result types and reporters summarize makespan, throughput, waiting time, turnaround time, and platform/virtual lane counts and averages; scaling reports can be written as CSV.
+
+Metrics use monotonic elapsed-time measurements. In this project, waiting time is measured from submission to first dispatch, turnaround time from submission to completion, and throughput as completed tasks per elapsed second. These values describe the included synthetic workloads on the machine where they run; they are not general performance guarantees.
+
+### `threadpool-web`: REST, run management, and event delivery
+
+This Spring Boot module adapts core pool operations to HTTP and manages independent in-memory runs.
+
+| Package | Responsibility |
+|---|---|
+| `controller/` | REST endpoints for presets, run creation/start/state/deletion, cancellation, task failure injection, traces, metrics, SSE events, and headless compare jobs. |
+| `service/` | Run lifecycle and limits, pool construction, task-spec validation, built-in presets, run cleanup, and asynchronous policy comparison. |
+| `dto/` | Request and response records; keeps the HTTP representation separate from core runtime objects. |
+| `event/` | Pool event records, bounded subscriber queues, trace storage/replay, SSE writing, and client disconnect handling. |
+| `config/`, `error/` | Web configuration, capacity settings, and mapping of validation/capacity/not-found failures to API responses. |
+| `WebApplication` | Spring Boot application entry point. |
+
+The live event endpoint uses SSE. Events have monotonically sequenced IDs and reconnecting clients can send `Last-Event-ID` to resume from the retained in-memory trace. The separate `/api/compare` path runs the same submitted workload under each policy without live event streaming, which is more appropriate for policy timing comparisons.
+
+### `threadpool-core/frontend`: browser interface
+
+The React, TypeScript, and Vite frontend has two modes:
+
+- **Simulated:** A browser-side presentation model for exploring graph states and scheduling policies. Its displayed simulated times are not measurements from the Java pool.
+- **Live Java:** Creates and starts a backend run, subscribes to SSE events, polls run state and metrics, and exposes cancellation and task-failure controls.
+
+During Maven packaging, `frontend-maven-plugin` provisions Node.js/npm, installs the locked dependency set, builds the frontend, and places the static assets in the web module so Spring Boot serves them at `/`.
+
+## API overview
+
+The web API is rooted at `/api`:
+
+| Method and path | Purpose |
+|---|---|
+| `GET /api/presets` | List built-in task-graph presets. |
+| `POST /api/runs` | Validate and create a run from a task batch. |
+| `POST /api/runs/{runId}/start` | Start dispatch for a created run. |
+| `GET /api/runs/{runId}` | Read run state and task states. |
+| `GET /api/runs/{runId}/events` | Subscribe to the live event stream; supports `Last-Event-ID` replay. |
+| `GET /api/runs/{runId}/trace` | Retrieve the retained event trace. |
+| `GET /api/runs/{runId}/metrics` | Read run and task metrics. |
+| `POST /api/runs/{runId}/tasks/{taskId}/fail` | Inject a task failure for demonstration. |
+| `POST /api/runs/{runId}/cancel` | Cancel the run. Running work reaches the cancellation boundary when its slice returns. |
+| `DELETE /api/runs/{runId}` | Remove a finished run. |
+| `POST /api/compare` | Submit a headless comparison job across scheduling policies. |
+| `GET /api/compare/{jobId}` | Read comparison job status or result. |
+
+Default web limits are five concurrent runs, 500 tasks per run, 2,000 in-flight tasks across runs, 16 workers per run, and five minutes of finished-run retention. These are configurable with `threadpool.limits.*`. Task burst estimates are capped at 60,000 ms by `TaskSpecFactory`. Run and compare state are in-memory and do not survive an application restart.
+
+## Build and run
+
+### Requirements
+
+- JDK 25
+- Apache Maven 3.9 or newer
+- Docker with the Compose plugin (optional, for containerized execution)
+
+The Maven compiler uses `--release 25`. The web build provisions its Node.js/npm toolchain through Maven.
+
+### Run the web application locally
+
+From the repository root:
+
+```bash
+mvn -pl threadpool-web -am package
+java -jar threadpool-web/target/threadpool-web-1.0.0.jar
+```
+
+Open [http://localhost:8080](http://localhost:8080) for the simulator and live Java modes.
+
+### Run with Docker Compose
+
+The Dockerfile builds the frontend and Spring Boot application in a Java 25 Maven image, then copies the executable JAR into a Java 25 runtime image. From the repository root:
+
+```bash
+docker compose up --build
+```
+
+Open [http://localhost:8080](http://localhost:8080). Stop with `Ctrl+C` or run `docker compose down` in another terminal.
+
+### Run CLI demonstrations and benchmarks
+
+From `threadpool-core/`:
+
+```bash
+mvn exec:java
+mvn exec:java -Dexec.args="--scale 2"
+mvn exec:java -Dexec.args="--hybrid 1"
+mvn exec:java -Dexec.args="--pinning"
+```
+
+The default CLI demo exercises the five policies on a small dependency-aware workload and demonstrates cycle rejection. `--scale` runs generated DAGs at increasing task counts; `--hybrid` compares platform-only, virtual-only, and hybrid lane configurations over several workload shapes; `--pinning` runs the virtual-thread carrier blocking experiment. Synthetic benchmark timings vary by hardware and load.
+
+### Tests
+
+Run the Maven test suite from the repository root:
+
+```bash
+mvn test
+```
+
+## Project map
+
+```text
+.
+├── pom.xml                         # Java 25 Maven reactor
+├── compose.yaml                    # Local container orchestration
+├── Dockerfile                      # Frontend + backend image build
+├── threadpool-core/
+│   ├── src/main/java/edu/oslab/threadpool/
+│   │   ├── scheduler/               # Five ready-queue policies
+│   │   ├── benchmark/               # Comparisons, scaling, reports
+│   │   ├── classifier/              # Optional lane classification
+│   │   ├── experiment/              # Carrier blocking experiment
+│   │   ├── DependencyGraph.java     # Prerequisite tracking and release
+│   │   ├── ThreadPoolManager.java   # Pool state and worker coordination
+│   │   └── WorkerThread.java        # Manual platform worker
+│   └── frontend/                    # React/TypeScript UI source
+└── threadpool-web/
+    └── src/main/java/edu/oslab/threadpool/web/
+        ├── controller/              # REST and SSE endpoints
+        ├── service/                  # Run lifecycle and compare jobs
+        ├── event/                    # Trace, replay, and SSE subscribers
+        └── dto/                      # HTTP request/response types
+```
+
+## Further reading
+
+- [Core design, execution lanes, and benchmark details](threadpool-core/README.md)
+- [Frontend design notes](threadpool-core/DESIGN.md)
