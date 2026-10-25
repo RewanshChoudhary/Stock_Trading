@@ -205,7 +205,6 @@ Default web limits are five concurrent runs, 500 tasks per run, 2,000 in-flight 
 
 - JDK 25
 - Apache Maven 3.9 or newer
-- Docker with the Compose plugin (optional, for containerized execution)
 
 The Maven compiler uses `--release 25`. The web build provisions its Node.js/npm toolchain through Maven.
 
@@ -214,21 +213,17 @@ The Maven compiler uses `--release 25`. The web build provisions its Node.js/npm
 From the repository root:
 
 ```bash
-mvn -pl threadpool-web -am package
-java -jar threadpool-web/target/threadpool-web-1.0.0.jar
+./run-local.sh
 ```
 
 Open [http://localhost:8080](http://localhost:8080) for the simulator and live Java modes.
 
-### Run with Docker Compose
-
-The Dockerfile builds the frontend and Spring Boot application in a Java 25 Maven image, then copies the executable JAR into a Java 25 runtime image. From the repository root:
+Set `JAVA_OPTS` to pass JVM options, or pass application arguments after the script name:
 
 ```bash
-docker compose up --build
+JAVA_OPTS="-Xmx1g" ./run-local.sh
+./run-local.sh --server.port=8081
 ```
-
-Open [http://localhost:8080](http://localhost:8080). Stop with `Ctrl+C` or run `docker compose down` in another terminal.
 
 ### Run CLI demonstrations and benchmarks
 
@@ -256,7 +251,7 @@ mvn test
 ```text
 .
 ├── pom.xml                         # Java 25 Maven reactor
-├── compose.yaml                    # Local container orchestration
+├── run-local.sh                    # Build and run the web app on the host
 ├── Dockerfile                      # Frontend + backend image build
 ├── threadpool-core/
 │   ├── src/main/java/edu/oslab/threadpool/
