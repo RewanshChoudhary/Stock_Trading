@@ -119,7 +119,7 @@ public final class EventRecorder implements PoolEventListener {
      */
     public void ensureRunFinished() {
         synchronized (this) {
-            if (terminated) {
+            if (terminated || aborted) {
                 return;
             }
             dispatch(PoolEvent.builder(PoolEventType.RUN_FINISHED));
@@ -226,7 +226,7 @@ public final class EventRecorder implements PoolEventListener {
 
     private void publish(PoolEvent.Builder builder) {
         synchronized (this) {
-            if (terminated) {
+            if (terminated || aborted) {
                 // A terminal event closes the trace and the stream: work that was already in flight
                 // when the run finished or was cancelled must not append to a closed record.
                 return;

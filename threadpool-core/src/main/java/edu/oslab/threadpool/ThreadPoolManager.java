@@ -207,9 +207,10 @@ public final class ThreadPoolManager implements AutoCloseable {
     }
 
     /**
-     * Cancels the run and stops accepting or dispatching work. Waiting tasks fail immediately;
-     * running tasks fail when their current cooperative slice returns. The result of a running
-     * slice is discarded, and workers then drain normally.
+     * Cancels the run and stops accepting or dispatching work. Every unfinished task is made
+     * terminal immediately so callers can observe a complete cancellation snapshot. A task body
+     * that is already executing is still allowed to return from its cooperative slice; its result
+     * is discarded when the pool observes the terminal state.
      */
     public void cancel() {
         lock.lock();
@@ -224,10 +225,6 @@ public final class ThreadPoolManager implements AutoCloseable {
             List<Task> cancelled = new ArrayList<>();
             for (Task task : tasks.values()) {
                 if (!task.state().isTerminal()) {
-                    if (task.state() == TaskState.RUNNING) {
-                        cancellationPending.add(task);
-                        continue;
-                    }
                     scheduler.onTaskFinished(task);
                     task.transitionTo(TaskState.FAILED, now, CANCELLED_MESSAGE);
                     cancelled.add(task);
