@@ -60,6 +60,19 @@ public interface PoolEventListener {
     default void onTaskFailed(String taskId, String reason) {
     }
 
+    /** Fired when a failed dependency is being considered for recovery. */
+    default void onTaskRecovering(String taskId, String reason) {
+    }
+
+    /** Fired after an advisor selects a recovery option. */
+    default void onAiDecision(
+            String taskId, String source, String optionId, String reason, boolean fallback) {
+    }
+
+    /** Fired after a recovery option successfully satisfies a failed dependency. */
+    default void onTaskRecovered(String taskId, String optionId) {
+    }
+
     /** Fired for each dependant failed because {@code causeTaskId} failed. */
     default void onTaskCascadeFailed(String taskId, String causeTaskId) {
     }

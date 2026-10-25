@@ -25,6 +25,9 @@ public record PoolEvent(
         SliceOutcome outcome,
         String cause,
         String message,
+        String advisorSource,
+        String recoveryOptionId,
+        Boolean advisorFallback,
         Integer priority,
         Long burstMs,
         List<String> dependencies,
@@ -49,6 +52,9 @@ public record PoolEvent(
         private SliceOutcome outcome;
         private String cause;
         private String message;
+        private String advisorSource;
+        private String recoveryOptionId;
+        private Boolean advisorFallback;
         private Integer priority;
         private Long burstMs;
         private List<String> dependencies;
@@ -94,6 +100,13 @@ public record PoolEvent(
             return this;
         }
 
+        public Builder decision(String source, String optionId, boolean fallback) {
+            this.advisorSource = source;
+            this.recoveryOptionId = optionId;
+            this.advisorFallback = fallback;
+            return this;
+        }
+
         public Builder submission(Integer priority, Long burstMs, List<String> dependencies) {
             this.priority = priority;
             this.burstMs = burstMs;
@@ -131,6 +144,9 @@ public record PoolEvent(
                     outcome,
                     cause,
                     message,
+                    advisorSource,
+                    recoveryOptionId,
+                    advisorFallback,
                     priority,
                     burstMs,
                     dependencies == null ? null : List.copyOf(dependencies),

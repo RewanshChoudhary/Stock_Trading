@@ -9,5 +9,17 @@ public record PresetResponse(
         String policy,
         Integer workerCount,
         Long quantum,
-        List<TaskSpecDto> tasks) {
+        List<TaskSpecDto> tasks,
+        String recoveryMode,
+        String advisor) {
+
+    public PresetResponse(
+            String name,
+            String description,
+            String policy,
+            Integer workerCount,
+            Long quantum,
+            List<TaskSpecDto> tasks) {
+        this(name, description, policy, workerCount, quantum, tasks, "RECOVER", "RULE_BASED");
+    }
 }

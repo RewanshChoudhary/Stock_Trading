@@ -3,11 +3,13 @@ package edu.oslab.threadpool.web.controller;
 import edu.oslab.threadpool.web.dto.CreateRunRequest;
 import edu.oslab.threadpool.web.dto.CreateRunResponse;
 import edu.oslab.threadpool.web.dto.PresetResponse;
+import edu.oslab.threadpool.web.dto.RecoveryCatalogEntry;
 import edu.oslab.threadpool.web.dto.RunMetricsResponse;
 import edu.oslab.threadpool.web.dto.RunStateResponse;
 import edu.oslab.threadpool.web.event.PoolEvent;
 import edu.oslab.threadpool.web.service.PresetFactory;
 import edu.oslab.threadpool.web.service.RunService;
+import edu.oslab.threadpool.web.service.RecoveryCatalog;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -37,6 +39,11 @@ public class RunController {
     @GetMapping("/presets")
     public List<PresetResponse> presets() {
         return PresetFactory.presets();
+    }
+
+    @GetMapping("/catalog")
+    public List<RecoveryCatalogEntry> catalog() {
+        return RecoveryCatalog.entries();
     }
 
     @PostMapping("/runs")

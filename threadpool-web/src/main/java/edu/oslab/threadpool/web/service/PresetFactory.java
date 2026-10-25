@@ -44,7 +44,9 @@ public final class PresetFactory {
                         task("link", 17, 3, "optimize", "lint"),
                         task("test", 28, 3, "link"),
                         task("package", 14, 2, "test"),
-                        ioTask("deploy", 9, 2, "package")));
+                        ioTask("deploy", 9, 2, "package")),
+                "RECOVER",
+                "RULE_BASED");
     }
 
     /** A deliberately cyclic graph; starting it must be rejected with the cycle path. */
@@ -58,7 +60,9 @@ public final class PresetFactory {
                 List.of(
                         task("cycle-a", 10, 2, "cycle-c"),
                         task("cycle-b", 10, 2, "cycle-a"),
-                        task("cycle-c", 10, 2, "cycle-b")));
+                        task("cycle-c", 10, 2, "cycle-b")),
+                "STRICT",
+                "RULE_BASED");
     }
 
     /** Classic diamond: one root, two parallel branches, one join. */
@@ -73,7 +77,9 @@ public final class PresetFactory {
                         task("source", 18, 2),
                         task("unit-tests", 28, 2, "source"),
                         task("lint", 15, 2, "source"),
-                        task("package", 17, 2, "unit-tests", "lint")));
+                        task("package", 17, 2, "unit-tests", "lint")),
+                "RECOVER",
+                "RULE_BASED");
     }
 
     /** One root, nine parallel dependants: grows the worker pool and shows scheduling order. */
@@ -89,7 +95,9 @@ public final class PresetFactory {
                 PolicyKind.MLFQ.name(),
                 DEFAULT_WORKERS,
                 DEFAULT_QUANTUM_MS,
-                tasks);
+                tasks,
+                "RECOVER",
+                "RULE_BASED");
     }
 
     /** A linear chain whose second task fails, so the cascade reaches every dependant. */
@@ -105,7 +113,9 @@ public final class PresetFactory {
                         failingTask("compile", 25, 3, 15, "build"),
                         task("unit-tests", 18, 2, "compile"),
                         task("package", 14, 2, "unit-tests"),
-                        task("deploy", 12, 2, "package")));
+                        task("deploy", 12, 2, "package")),
+                "STRICT",
+                "RULE_BASED");
     }
 
     private static TaskSpecDto task(String id, long burstMs, int priority, String... dependsOn) {

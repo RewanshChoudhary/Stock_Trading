@@ -4,6 +4,7 @@ import java.util.Objects;
 
 public final class Task {
     private final TaskSpec spec;
+    private final boolean internalRecoveryAttempt;
     private volatile TaskState state = TaskState.PENDING;
     private volatile Lane lane = Lane.PLATFORM;
     private volatile long criticalPathWeight;
@@ -15,7 +16,12 @@ public final class Task {
     private volatile boolean failRequested;
 
     public Task(TaskSpec spec) {
+        this(spec, false);
+    }
+
+    Task(TaskSpec spec, boolean internalRecoveryAttempt) {
         this.spec = Objects.requireNonNull(spec, "spec");
+        this.internalRecoveryAttempt = internalRecoveryAttempt;
     }
 
     public String id() {
@@ -24,6 +30,10 @@ public final class Task {
 
     public TaskSpec spec() {
         return spec;
+    }
+
+    boolean isInternalRecoveryAttempt() {
+        return internalRecoveryAttempt;
     }
 
     public TaskState state() {
@@ -56,9 +66,11 @@ public final class Task {
     public synchronized void transitionTo(TaskState next, long atNanos, String failure) {
         Objects.requireNonNull(next, "next");
         boolean allowed = switch (state) {
-            case PENDING -> next == TaskState.READY || next == TaskState.FAILED;
+            case PENDING -> next == TaskState.READY || next == TaskState.RECOVERING || next == TaskState.FAILED;
             case READY -> next == TaskState.RUNNING || next == TaskState.FAILED;
-            case RUNNING -> next == TaskState.READY || next == TaskState.DONE || next == TaskState.FAILED;
+            case RECOVERING -> next == TaskState.READY || next == TaskState.FAILED;
+            case RUNNING -> next == TaskState.READY || next == TaskState.RECOVERING
+                    || next == TaskState.DONE || next == TaskState.FAILED;
             case DONE, FAILED -> false;
         };
         if (!allowed) {

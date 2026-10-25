@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -32,7 +33,13 @@ public final class ThreadPoolManager implements AutoCloseable {
     private final LaneClassifier laneClassifier;
     private final Map<String, Task> tasks = new LinkedHashMap<>();
     private final Set<WorkerThread> workers = new LinkedHashSet<>();
-    private final Set<Task> cancellationPending = new LinkedHashSet<>();
+    private final Map<String, RecoverySession> recoverySessions = new LinkedHashMap<>();
+    private final Map<Task, RecoveryAttempt> recoveryAttempts = new IdentityHashMap<>();
+    private final Set<Thread> recoveryThreads = new LinkedHashSet<>();
+    private final RecoveryMode recoveryMode;
+    private final RecoveryAdvisor recoveryAdvisor;
+    private final RecoveryOptionProvider recoveryOptionProvider;
+    private final RuleBasedRecoveryAdvisor fallbackAdvisor = new RuleBasedRecoveryAdvisor();
     private final int minWorkerCount;
     private final int maxWorkerCount;
     private final Duration idleShrinkDelay;
@@ -43,9 +50,20 @@ public final class ThreadPoolManager implements AutoCloseable {
     private boolean runStarted;
     private boolean runFinishedNotified;
     private boolean runAborted;
+    private long recoverySequence;
 
     public ThreadPoolManager(int workerCount, SchedulerPolicy scheduler) {
         this(workerCount, workerCount, workerCount, scheduler, Duration.ofSeconds(2));
+    }
+
+    public ThreadPoolManager(
+            int workerCount,
+            SchedulerPolicy scheduler,
+            RecoveryMode recoveryMode,
+            RecoveryAdvisor recoveryAdvisor,
+            RecoveryOptionProvider recoveryOptionProvider) {
+        this(workerCount, workerCount, workerCount, scheduler, Duration.ofSeconds(2), 100, false,
+                recoveryMode, recoveryAdvisor, recoveryOptionProvider);
     }
 
     public ThreadPoolManager(
@@ -83,6 +101,22 @@ public final class ThreadPoolManager implements AutoCloseable {
             Duration idleShrinkDelay,
             int maxVirtualTasks,
             boolean classificationEnabled) {
+        this(initialWorkerCount, minWorkerCount, maxWorkerCount, scheduler, idleShrinkDelay,
+                maxVirtualTasks, classificationEnabled, RecoveryMode.STRICT,
+                new RuleBasedRecoveryAdvisor(), (task, reason) -> List.of());
+    }
+
+    public ThreadPoolManager(
+            int initialWorkerCount,
+            int minWorkerCount,
+            int maxWorkerCount,
+            SchedulerPolicy scheduler,
+            Duration idleShrinkDelay,
+            int maxVirtualTasks,
+            boolean classificationEnabled,
+            RecoveryMode recoveryMode,
+            RecoveryAdvisor recoveryAdvisor,
+            RecoveryOptionProvider recoveryOptionProvider) {
         if (minWorkerCount < 1 || initialWorkerCount < minWorkerCount || maxWorkerCount < initialWorkerCount) {
             throw new IllegalArgumentException("Worker counts must satisfy 1 <= min <= initial <= max");
         }
@@ -96,6 +130,9 @@ public final class ThreadPoolManager implements AutoCloseable {
         this.minWorkerCount = minWorkerCount;
         this.maxWorkerCount = maxWorkerCount;
         this.idleShrinkDelay = idleShrinkDelay;
+        this.recoveryMode = Objects.requireNonNull(recoveryMode, "recoveryMode");
+        this.recoveryAdvisor = Objects.requireNonNull(recoveryAdvisor, "recoveryAdvisor");
+        this.recoveryOptionProvider = Objects.requireNonNull(recoveryOptionProvider, "recoveryOptionProvider");
 
         lock.lock();
         try {
@@ -233,6 +270,16 @@ public final class ThreadPoolManager implements AutoCloseable {
             for (Task task : cancelled) {
                 fireEvent(current -> current.onTaskFailed(task.id(), CANCELLED_MESSAGE));
             }
+            for (RecoveryAttempt attempt : recoveryAttempts.values()) {
+                Task attemptTask = attempt.task();
+                if (!attemptTask.state().isTerminal()) {
+                    scheduler.onTaskFinished(attemptTask);
+                    attemptTask.transitionTo(TaskState.FAILED, now, CANCELLED_MESSAGE);
+                }
+            }
+            recoveryAttempts.clear();
+            recoverySessions.clear();
+            recoveryThreads.forEach(Thread::interrupt);
             fireEvent(PoolEventListener::onRunAborted);
             workAvailable.signalAll();
             stateChanged.signalAll();
@@ -263,9 +310,7 @@ public final class ThreadPoolManager implements AutoCloseable {
             }
             long now = System.nanoTime();
             scheduler.onTaskFinished(task);
-            task.transitionTo(TaskState.FAILED, now, INJECTED_FAILURE_MESSAGE);
-            fireEvent(current -> current.onTaskFailed(taskId, INJECTED_FAILURE_MESSAGE));
-            failDescendantsLocked(taskId, now, INJECTED_FAILURE_MESSAGE);
+            handleTaskFailureLocked(task, INJECTED_FAILURE_MESSAGE, now);
             workAvailable.signalAll();
             stateChanged.signalAll();
             maybeFireRunFinishedLocked();
@@ -282,7 +327,7 @@ public final class ThreadPoolManager implements AutoCloseable {
         long remaining = timeout.toNanos();
         lock.lockInterruptibly();
         try {
-            while (!workers.isEmpty() || dispatcher.virtualTasksPending() > 0) {
+            while (!workers.isEmpty() || dispatcher.virtualTasksPending() > 0 || !recoveryThreads.isEmpty()) {
                 if (remaining <= 0) {
                     return false;
                 }
@@ -419,14 +464,13 @@ public final class ThreadPoolManager implements AutoCloseable {
                 // A task may have become terminal while its slice was in flight.
                 return;
             }
-            if (cancellationPending.remove(task)) {
-                task.transitionTo(TaskState.FAILED, now, CANCELLED_MESSAGE);
-                scheduler.onTaskFinished(task);
-                fireEvent(current -> current.onTaskFailed(task.id(), CANCELLED_MESSAGE));
+            if (task.state() == TaskState.RECOVERING && !recoveryAttempts.containsKey(task)) {
+                // Another failed prerequisite made an in-flight dependent obsolete. Its body may
+                // still return, but it must not complete or reopen the dependency graph.
                 stateChanged.signalAll();
-                maybeFireRunFinishedLocked();
                 return;
             }
+            RecoveryAttempt recoveryAttempt = recoveryAttempts.get(task);
             String injectedFailure = task.isFailureRequested() ? INJECTED_FAILURE_MESSAGE : null;
             if (injectedFailure != null || failure != null) {
                 String message = injectedFailure != null
@@ -434,14 +478,21 @@ public final class ThreadPoolManager implements AutoCloseable {
                         : failure.getClass().getSimpleName() + ": " + failure.getMessage();
                 task.transitionTo(TaskState.FAILED, now, message);
                 scheduler.onTaskFinished(task);
-                fireEvent(current -> current.onTaskFailed(task.id(), message));
-                failDescendantsLocked(task.id(), now, message);
+                if (recoveryAttempt != null) {
+                    handleRecoveryAttemptFailureLocked(recoveryAttempt, message, now);
+                } else {
+                    handleTaskFailureLocked(task, message, now);
+                }
             } else if (result.isComplete()) {
                 task.transitionTo(TaskState.DONE, now, null);
                 scheduler.onTaskFinished(task);
-                fireEvent(current -> current.onTaskCompleted(task.id()));
-                for (String id : dependencyGraph.markCompleted(task.id())) {
-                    makeReadyLocked(tasks.get(id), now);
+                if (recoveryAttempt != null) {
+                    handleRecoveryAttemptSuccessLocked(recoveryAttempt, now);
+                } else {
+                    fireEvent(current -> current.onTaskCompleted(task.id()));
+                    for (String id : dependencyGraph.markCompleted(task.id())) {
+                        makeReadyLocked(tasks.get(id), now);
+                    }
                 }
             } else {
                 task.transitionTo(TaskState.READY, now, null);
@@ -495,12 +546,18 @@ public final class ThreadPoolManager implements AutoCloseable {
 
     /** Publishes a slice start event for the lane that is about to run {@code task}. */
     void publishSliceStarted(Task task, Lane lane, String workerName) {
+        if (task.isInternalRecoveryAttempt()) {
+            return;
+        }
         fireEvent(current -> current.onSliceStarted(task.id(), workerName, lane));
     }
 
     /** Publishes a slice end event for the lane that just ran {@code task}. */
     void publishSliceEnded(
             Task task, Lane lane, String workerName, long sliceMs, PoolEventListener.SliceOutcome outcome) {
+        if (task.isInternalRecoveryAttempt()) {
+            return;
+        }
         fireEvent(current -> current.onSliceEnded(task.id(), workerName, lane, sliceMs, outcome));
     }
 
@@ -525,7 +582,7 @@ public final class ThreadPoolManager implements AutoCloseable {
         if (task == null) {
             throw new IllegalStateException("Dependency graph produced an invalid ready task");
         }
-        if (task.state() != TaskState.PENDING) {
+        if (task.state() != TaskState.PENDING && task.state() != TaskState.RECOVERING) {
             // The task was cancelled or failed externally while it was still waiting for its
             // dependencies, so the graph's ready signal is stale and must be ignored.
             return;
@@ -534,6 +591,177 @@ public final class ThreadPoolManager implements AutoCloseable {
         scheduler.offer(task, nowNanos);
         int readyQueueDepth = scheduler.readyCount();
         fireEvent(current -> current.onTaskReady(task.id(), readyQueueDepth));
+    }
+
+    private void handleTaskFailureLocked(Task task, String reason, long nowNanos) {
+        fireEvent(current -> current.onTaskFailed(task.id(), reason));
+        Set<String> descendants = dependencyGraph.descendantsOf(task.id());
+        if (recoveryMode != RecoveryMode.RECOVER || descendants.isEmpty()) {
+            failDescendantsLocked(task.id(), nowNanos, reason);
+            return;
+        }
+
+        for (String descendantId : descendants) {
+            Task descendant = tasks.get(descendantId);
+            if (descendant != null && !descendant.state().isTerminal()
+                    && descendant.state() != TaskState.RECOVERING) {
+                scheduler.onTaskFinished(descendant);
+                descendant.transitionTo(TaskState.RECOVERING, nowNanos, reason);
+                fireEvent(current -> current.onTaskRecovering(descendant.id(), reason));
+            }
+        }
+        RecoverySession session = new RecoverySession(task, reason);
+        recoverySessions.put(task.id(), session);
+        startAdvisorLocked(session);
+    }
+
+    private void startAdvisorLocked(RecoverySession session) {
+        if (runAborted || !recoverySessions.containsKey(session.failedTask().id())) {
+            return;
+        }
+        Thread advisorThread = Thread.ofPlatform()
+                .name("recovery-advisor-" + session.failedTask().id())
+                .unstarted(() -> runAdvisor(session));
+        recoveryThreads.add(advisorThread);
+        advisorThread.start();
+    }
+
+    private void runAdvisor(RecoverySession session) {
+        List<RecoveryOption> options;
+        try {
+            options = List.copyOf(Objects.requireNonNull(
+                    recoveryOptionProvider.optionsFor(session.failedTask(), session.failureReason()),
+                    "Recovery option provider returned null"));
+        } catch (Throwable failure) {
+            options = List.of();
+        }
+
+        RecoveryContext context;
+        lock.lock();
+        try {
+            if (runAborted || recoverySessions.get(session.failedTask().id()) != session) {
+                recoveryThreads.remove(Thread.currentThread());
+                stateChanged.signalAll();
+                return;
+            }
+            session.setOptions(options);
+            context = new RecoveryContext(
+                    session.failedTask().id(),
+                    session.failureReason(),
+                    session.failedTask().spec().priority(),
+                    session.failedTask().criticalPathWeight(),
+                    workers.size(),
+                    options,
+                    session.exhaustedOptionIds());
+        } finally {
+            lock.unlock();
+        }
+
+        RecoveryDecision decision = null;
+        try {
+            if (!options.isEmpty()) {
+                decision = recoveryAdvisor.choose(context);
+            }
+        } catch (Throwable ignored) {
+            // The deterministic advisor below is the safety net for provider failures,
+            // provider timeouts, malformed external responses, and advisor bugs.
+        }
+        applyAdvisorDecision(session, context, decision);
+    }
+
+    private void applyAdvisorDecision(
+            RecoverySession session, RecoveryContext context, RecoveryDecision proposed) {
+        lock.lock();
+        try {
+            if (runAborted || recoverySessions.get(session.failedTask().id()) != session) {
+                return;
+            }
+            RecoveryDecision decision = proposed;
+            boolean fallback = false;
+            if (!isAllowedDecision(context, decision)) {
+                try {
+                    RecoveryDecision rule = fallbackAdvisor.choose(context);
+                    decision = new RecoveryDecision(rule.optionId(), rule.reason(), "Rule-based", true);
+                    fallback = true;
+                } catch (Throwable ignored) {
+                    decision = null;
+                }
+            }
+            if (!isAllowedDecision(context, decision)) {
+                recoverySessions.remove(session.failedTask().id());
+                failDescendantsLocked(session.failedTask().id(), System.nanoTime(), session.failureReason());
+                return;
+            }
+            RecoveryDecision selected = decision;
+            RecoveryOption option = context.options().stream()
+                    .filter(candidate -> candidate.id().equals(selected.optionId()))
+                    .findFirst()
+                    .orElseThrow();
+            session.recordAttempt(option.id());
+            boolean selectedFallback = fallback;
+            fireEvent(current -> current.onAiDecision(
+                    session.failedTask().id(),
+                    selected.source(),
+                    selected.optionId(),
+                    selected.reason(),
+                    selectedFallback || selected.fallback()));
+            scheduleRecoveryAttemptLocked(session, option);
+        } finally {
+            recoveryThreads.remove(Thread.currentThread());
+            stateChanged.signalAll();
+            lock.unlock();
+        }
+    }
+
+    private boolean isAllowedDecision(RecoveryContext context, RecoveryDecision decision) {
+        if (decision == null) {
+            return false;
+        }
+        return context.options().stream().anyMatch(option ->
+                option.id().equals(decision.optionId())
+                        && !context.attemptedOptionIds().contains(option.id()));
+    }
+
+    private void scheduleRecoveryAttemptLocked(RecoverySession session, RecoveryOption option) {
+        TaskSpec source = option.executionSpec();
+        String id = "__recovery__" + session.failedTask().id() + "-" + (++recoverySequence);
+        TaskSpec attemptSpec = new TaskSpec(
+                id, source.priority(), source.estimatedBurstMillis(), Set.of(), source.work(), source.blocking());
+        Task attemptTask = new Task(attemptSpec, true);
+        attemptTask.markSubmitted(System.nanoTime());
+        attemptTask.transitionTo(TaskState.READY, System.nanoTime(), null);
+        RecoveryAttempt attempt = new RecoveryAttempt(session, option, attemptTask);
+        recoveryAttempts.put(attemptTask, attempt);
+        scheduler.offer(attemptTask, System.nanoTime());
+        workAvailable.signalAll();
+    }
+
+    private void handleRecoveryAttemptSuccessLocked(RecoveryAttempt attempt, long nowNanos) {
+        recoveryAttempts.remove(attempt.task());
+        RecoverySession session = attempt.session();
+        if (recoverySessions.remove(session.failedTask().id(), session)) {
+            for (String id : dependencyGraph.markRecovered(session.failedTask().id())) {
+                makeReadyLocked(tasks.get(id), nowNanos);
+            }
+            fireEvent(current -> current.onTaskRecovered(
+                    session.failedTask().id(), attempt.option().id()));
+        }
+    }
+
+    private void handleRecoveryAttemptFailureLocked(
+            RecoveryAttempt attempt, String reason, long nowNanos) {
+        recoveryAttempts.remove(attempt.task());
+        RecoverySession session = attempt.session();
+        session.recordFailure(attempt.option().id());
+        if (recoverySessions.get(session.failedTask().id()) != session) {
+            return;
+        }
+        if (session.hasAvailableOption()) {
+            startAdvisorLocked(session);
+        } else {
+            recoverySessions.remove(session.failedTask().id());
+            failDescendantsLocked(session.failedTask().id(), nowNanos, reason);
+        }
     }
 
     private void failDescendantsLocked(String failedTaskId, long nowNanos, String cause) {
@@ -551,7 +779,57 @@ public final class ThreadPoolManager implements AutoCloseable {
     }
 
     private boolean allTasksTerminalLocked() {
-        return tasks.values().stream().allMatch(task -> task.state().isTerminal());
+        return recoverySessions.isEmpty() && tasks.values().stream().allMatch(task -> task.state().isTerminal());
+    }
+
+    private record RecoveryAttempt(RecoverySession session, RecoveryOption option, Task task) {
+    }
+
+    private static final class RecoverySession {
+        private final Task failedTask;
+        private final String failureReason;
+        private List<RecoveryOption> options = List.of();
+        private final Map<String, Integer> attempts = new LinkedHashMap<>();
+        private final Set<String> exhausted = new LinkedHashSet<>();
+
+        private RecoverySession(Task failedTask, String failureReason) {
+            this.failedTask = failedTask;
+            this.failureReason = failureReason;
+        }
+
+        private Task failedTask() {
+            return failedTask;
+        }
+
+        private String failureReason() {
+            return failureReason;
+        }
+
+        private void setOptions(List<RecoveryOption> options) {
+            this.options = options;
+        }
+
+        private Set<String> exhaustedOptionIds() {
+            return Set.copyOf(exhausted);
+        }
+
+        private void recordAttempt(String optionId) {
+            attempts.merge(optionId, 1, Integer::sum);
+        }
+
+        private void recordFailure(String optionId) {
+            RecoveryOption option = options.stream()
+                    .filter(candidate -> candidate.id().equals(optionId))
+                    .findFirst()
+                    .orElse(null);
+            if (option != null && attempts.getOrDefault(optionId, 0) >= option.maxAttempts()) {
+                exhausted.add(optionId);
+            }
+        }
+
+        private boolean hasAvailableOption() {
+            return options.stream().anyMatch(option -> !exhausted.contains(option.id()));
+        }
     }
 
     private void scaleUpForQueueLocked() {

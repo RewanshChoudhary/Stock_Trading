@@ -2,6 +2,7 @@ package edu.oslab.threadpool.web.service;
 
 import edu.oslab.threadpool.TaskMetrics;
 import edu.oslab.threadpool.TaskSpec;
+import edu.oslab.threadpool.RecoveryAdvisor;
 import edu.oslab.threadpool.web.dto.CreateRunRequest;
 import edu.oslab.threadpool.web.dto.CreateRunResponse;
 import edu.oslab.threadpool.web.dto.RunMetricsResponse;
@@ -49,11 +50,14 @@ public class RunService {
     private final Map<String, Run> runs = new ConcurrentHashMap<>();
     private final RunLimitsProperties limits;
     private final SseProperties sseProperties;
+    private final LlmAdvisorFactory llmAdvisorFactory;
     private final Thread janitor;
 
-    public RunService(RunLimitsProperties limits, SseProperties sseProperties) {
+    public RunService(
+            RunLimitsProperties limits, SseProperties sseProperties, LlmAdvisorFactory llmAdvisorFactory) {
         this.limits = limits;
         this.sseProperties = sseProperties;
+        this.llmAdvisorFactory = llmAdvisorFactory;
         this.janitor = Thread.ofPlatform()
                 .daemon(true)
                 .name("run-janitor")
@@ -93,6 +97,8 @@ public class RunService {
             throw new RunValidationException("A run definition is required");
         }
         PolicyKind policy = PolicyKind.parse(request.policy());
+        RecoveryModeKind recoveryMode = RecoveryModeKind.parse(request.recoveryMode());
+        AdvisorKind advisorKind = AdvisorKind.parse(request.advisor());
         List<TaskSpecDto> tasks = request.tasks() == null ? List.of() : request.tasks();
         if (tasks.isEmpty()) {
             throw new RunValidationException("A run needs at least one task");
@@ -123,7 +129,25 @@ public class RunService {
         String runId = UUID.randomUUID().toString();
         EventRecorder recorder = new EventRecorder(
                 runId, Duration.ofSeconds(sseProperties.heartbeatSeconds()), sseProperties.queueCapacity());
-        Run run = new Run(runId, policy, workerCount, quantum, taskSpecs, recorder);
+        RecoveryAdvisor advisor = advisorKind == AdvisorKind.LLM
+                ? llmAdvisorFactory.newAdvisor()
+                : new edu.oslab.threadpool.RuleBasedRecoveryAdvisor();
+        boolean hasExplicitRecoverySelection = request.recoveryMode() != null;
+        edu.oslab.threadpool.RecoveryOptionProvider optionProvider = hasExplicitRecoverySelection
+                && recoveryMode == RecoveryModeKind.RECOVER
+                        ? RecoveryCatalog::optionsFor
+                        : (task, reason) -> List.of();
+        Run run = new Run(
+                runId,
+                policy,
+                workerCount,
+                quantum,
+                taskSpecs,
+                recorder,
+                recoveryMode.coreMode(),
+                advisorKind,
+                advisor,
+                optionProvider);
         runs.put(runId, run);
         LOGGER.info(
                 "Created run {} ({} tasks, {} workers, policy {})",
@@ -187,8 +211,16 @@ public class RunService {
                 metrics.size(),
                 completed,
                 failed,
+                (int) run.recorder().events().stream()
+                        .filter(event -> event.type() == edu.oslab.threadpool.web.event.PoolEventType.TASK_RECOVERED)
+                        .count(),
+                (int) run.recorder().events().stream()
+                        .filter(event -> event.type() == edu.oslab.threadpool.web.event.PoolEventType.AI_DECISION)
+                        .count(),
                 run.taskStateCounts(),
-                metrics.stream().map(RunService::toDto).toList());
+                metrics.stream().map(RunService::toDto).toList(),
+                run.recoveryMode().name(),
+                run.advisorKind().name());
     }
 
     /** The recorded trace of a run, in sequence order. */
@@ -253,7 +285,9 @@ public class RunService {
                 run.readyCount(),
                 run.workerCount(),
                 run.elapsedMillis(),
-                run.taskStateCounts());
+                run.taskStateCounts(),
+                run.recoveryMode().name(),
+                run.advisorKind().name());
     }
 
     private Run require(String runId) {

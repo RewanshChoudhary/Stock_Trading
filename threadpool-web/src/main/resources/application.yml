@@ -20,6 +20,11 @@ threadpool:
   sse:
     queue-capacity: 1024
     heartbeat-seconds: 15
+  recovery:
+    llm:
+      endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent
+      timeout-ms: 3000
+      max-calls: 10
 
 logging:
   level:

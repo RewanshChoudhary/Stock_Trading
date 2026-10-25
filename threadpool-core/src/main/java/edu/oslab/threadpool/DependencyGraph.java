@@ -13,6 +13,7 @@ public final class DependencyGraph {
     private final Map<String, Set<String>> dependents = new LinkedHashMap<>();
     private final Map<String, Integer> unresolvedCounts = new LinkedHashMap<>();
     private final Set<String> completed = new LinkedHashSet<>();
+    private final Set<String> satisfiedDependencies = new LinkedHashSet<>();
 
     /**
      * Validates a complete batch before changing the graph. Dependencies may refer
@@ -53,7 +54,7 @@ public final class DependencyGraph {
             for (String dependency : taskDependencies) {
                 dependents.computeIfAbsent(dependency, ignored -> new LinkedHashSet<>()).add(spec.id());
             }
-            int unresolved = (int) taskDependencies.stream().filter(id -> !completed.contains(id)).count();
+            int unresolved = (int) taskDependencies.stream().filter(id -> !satisfiedDependencies.contains(id)).count();
             unresolvedCounts.put(spec.id(), unresolved);
         }
 
@@ -73,7 +74,22 @@ public final class DependencyGraph {
         if (!completed.add(taskId)) {
             throw new IllegalStateException("Task already completed: " + taskId);
         }
+        return satisfyDependents(taskId);
+    }
 
+    /** Satisfies dependency edges after a successful recovery without marking the task done. */
+    public Set<String> markRecovered(String taskId) {
+        if (!dependencies.containsKey(taskId)) {
+            throw new IllegalArgumentException("Unknown task: " + taskId);
+        }
+        if (completed.contains(taskId) || !satisfiedDependencies.add(taskId)) {
+            throw new IllegalStateException("Dependency already satisfied: " + taskId);
+        }
+        return satisfyDependents(taskId);
+    }
+
+    private Set<String> satisfyDependents(String taskId) {
+        satisfiedDependencies.add(taskId);
         Set<String> newlyReady = new LinkedHashSet<>();
         for (String dependent : dependents.getOrDefault(taskId, Set.of())) {
             int remaining = unresolvedCounts.compute(dependent, (ignored, count) -> count - 1);

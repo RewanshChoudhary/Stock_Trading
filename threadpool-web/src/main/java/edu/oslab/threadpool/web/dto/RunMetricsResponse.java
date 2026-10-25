@@ -16,6 +16,10 @@ public record RunMetricsResponse(
         int taskCount,
         int completedCount,
         int failedCount,
+        int recoveredCount,
+        int recoveryDecisionCount,
         Map<String, Integer> stateCounts,
-        List<TaskMetricsDto> perTask) {
+        List<TaskMetricsDto> perTask,
+        String recoveryMode,
+        String advisor) {
 }

@@ -12,5 +12,7 @@ public record RunStateResponse(
         int readyCount,
         int workerCount,
         long elapsedMs,
-        Map<String, Integer> stateCounts) {
+        Map<String, Integer> stateCounts,
+        String recoveryMode,
+        String advisor) {
 }

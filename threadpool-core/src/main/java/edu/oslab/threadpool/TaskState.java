@@ -3,6 +3,7 @@ package edu.oslab.threadpool;
 public enum TaskState {
     PENDING,
     READY,
+    RECOVERING,
     RUNNING,
     DONE,
     FAILED;

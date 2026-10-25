@@ -203,6 +203,26 @@ public final class EventRecorder implements PoolEventListener {
     }
 
     @Override
+    public void onTaskRecovering(String taskId, String reason) {
+        publish(PoolEvent.builder(PoolEventType.TASK_RECOVERING).task(taskId).message(reason));
+    }
+
+    @Override
+    public void onAiDecision(String taskId, String source, String optionId, String reason, boolean fallback) {
+        publish(PoolEvent.builder(PoolEventType.AI_DECISION)
+                .task(taskId)
+                .message(reason)
+                .decision(source, optionId, fallback));
+    }
+
+    @Override
+    public void onTaskRecovered(String taskId, String optionId) {
+        publish(PoolEvent.builder(PoolEventType.TASK_RECOVERED)
+                .task(taskId)
+                .decision(null, optionId, false));
+    }
+
+    @Override
     public void onTaskCascadeFailed(String taskId, String causeTaskId) {
         publish(PoolEvent.builder(PoolEventType.TASK_CASCADE_FAILED)
                 .task(taskId)

@@ -4,6 +4,9 @@ import edu.oslab.threadpool.TaskMetrics;
 import edu.oslab.threadpool.TaskSpec;
 import edu.oslab.threadpool.TaskState;
 import edu.oslab.threadpool.ThreadPoolManager;
+import edu.oslab.threadpool.RecoveryAdvisor;
+import edu.oslab.threadpool.RecoveryMode;
+import edu.oslab.threadpool.RecoveryOptionProvider;
 import edu.oslab.threadpool.web.event.EventRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +34,8 @@ public final class Run {
     private final PolicyKind policy;
     private final int workerCount;
     private final long quantumMillis;
+    private final RecoveryMode recoveryMode;
+    private final AdvisorKind advisorKind;
     private final List<TaskSpec> taskSpecs;
     private final EventRecorder recorder;
     private final ThreadPoolManager pool;
@@ -45,14 +50,30 @@ public final class Run {
             int workerCount,
             long quantumMillis,
             List<TaskSpec> taskSpecs,
-            EventRecorder recorder) {
+            EventRecorder recorder,
+            RecoveryMode recoveryMode,
+            AdvisorKind advisorKind,
+            RecoveryAdvisor advisor,
+            RecoveryOptionProvider optionProvider) {
         this.id = id;
         this.policy = policy;
         this.workerCount = workerCount;
         this.quantumMillis = quantumMillis;
+        this.recoveryMode = recoveryMode;
+        this.advisorKind = advisorKind;
         this.taskSpecs = List.copyOf(taskSpecs);
         this.recorder = recorder;
-        this.pool = new ThreadPoolManager(workerCount, policy.newScheduler(quantumMillis));
+        this.pool = new ThreadPoolManager(
+                workerCount,
+                workerCount,
+                workerCount,
+                policy.newScheduler(quantumMillis),
+                Duration.ofSeconds(2),
+                100,
+                false,
+                recoveryMode,
+                advisor,
+                optionProvider);
         this.pool.setListener(recorder);
         this.supervisor = Thread.ofPlatform().name("run-supervisor-" + id).unstarted(this::supervise);
     }
@@ -71,6 +92,14 @@ public final class Run {
 
     long quantumMillis() {
         return quantumMillis;
+    }
+
+    RecoveryMode recoveryMode() {
+        return recoveryMode;
+    }
+
+    AdvisorKind advisorKind() {
+        return advisorKind;
     }
 
     List<TaskSpec> taskSpecs() {
