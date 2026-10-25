@@ -48,7 +48,7 @@ Together these elements make the project useful as a teaching and experimentatio
 - Optional sampling-based lane classification for platform work. It is disabled by default.
 - Failure injection, cancellation, descendant failure propagation, task timing metrics, benchmark workloads, and event reporting.
 - A Spring Boot API and browser interface for creating, observing, cancelling, and comparing runs.
-- Docker Compose support for building and running the web application and bundled frontend.
+- A local runner that builds and starts the web application with its bundled frontend.
 
 ### Outside the scope
 
