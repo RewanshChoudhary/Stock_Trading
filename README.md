@@ -252,7 +252,6 @@ mvn test
 .
 ├── pom.xml                         # Java 25 Maven reactor
 ├── run-local.sh                    # Build and run the web app on the host
-├── Dockerfile                      # Frontend + backend image build
 ├── threadpool-core/
 │   ├── src/main/java/edu/oslab/threadpool/
 │   │   ├── scheduler/               # Five ready-queue policies
