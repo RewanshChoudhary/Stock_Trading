@@ -5,6 +5,9 @@ threadpool-web/src/main/resources/static/
 **/node_modules/
 *.tsbuildinfo
 
+# Local environment and secrets
+.env
+
 # IDEs and editors
 .idea/
 *.iml

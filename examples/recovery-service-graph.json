@@ -1,0 +1,27 @@
+{
+  "policy": "MLFQ",
+  "workerCount": 6,
+  "quantum": 10,
+  "recoveryMode": "RECOVER",
+  "advisor": "RULE_BASED",
+  "tasks": [
+    {"id": "sg-bootstrap", "burstMs": 9, "priority": 8, "dependsOn": [], "blocking": false},
+    {"id": "sg-registry", "burstMs": 13, "priority": 7, "dependsOn": ["sg-bootstrap"], "blocking": true},
+    {"id": "sg-auth-compile", "burstMs": 21, "priority": 9, "dependsOn": ["sg-registry"], "failAtMs": 8, "blocking": false},
+    {"id": "sg-auth-package", "burstMs": 14, "priority": 8, "dependsOn": ["sg-auth-compile"], "blocking": false},
+    {"id": "sg-billing-compile", "burstMs": 19, "priority": 7, "dependsOn": ["sg-registry"], "blocking": false},
+    {"id": "sg-billing-tests", "burstMs": 25, "priority": 8, "dependsOn": ["sg-billing-compile"], "failAtMs": 11, "blocking": false},
+    {"id": "sg-billing-package", "burstMs": 15, "priority": 7, "dependsOn": ["sg-billing-tests"], "blocking": false},
+    {"id": "sg-search-index", "burstMs": 23, "priority": 6, "dependsOn": ["sg-registry"], "failAtMs": 10, "blocking": false},
+    {"id": "sg-search-package", "burstMs": 16, "priority": 6, "dependsOn": ["sg-search-index"], "blocking": false},
+    {"id": "sg-docs-publish", "burstMs": 12, "priority": 2, "dependsOn": ["sg-bootstrap"], "failAtMs": 5, "blocking": false},
+    {"id": "sg-mesh-assemble", "burstMs": 18, "priority": 9, "dependsOn": ["sg-auth-package", "sg-billing-package", "sg-search-package", "sg-docs-publish"], "blocking": false},
+    {"id": "sg-contract-suite", "burstMs": 30, "priority": 9, "dependsOn": ["sg-mesh-assemble"], "failAtMs": 13, "blocking": false},
+    {"id": "sg-image-build", "burstMs": 20, "priority": 8, "dependsOn": ["sg-contract-suite"], "blocking": false},
+    {"id": "sg-canary-gate", "burstMs": 17, "priority": 9, "dependsOn": ["sg-image-build"], "failAtMs": 7, "blocking": false},
+    {"id": "sg-rollout", "burstMs": 15, "priority": 8, "dependsOn": ["sg-canary-gate"], "blocking": true},
+    {"id": "sg-metrics-ping", "burstMs": 10, "priority": 1, "dependsOn": ["sg-bootstrap"], "failAtMs": 4, "blocking": false},
+    {"id": "sg-postmortem-draft", "burstMs": 11, "priority": 3, "dependsOn": ["sg-image-build"], "blocking": false},
+    {"id": "sg-status-page", "burstMs": 8, "priority": 2, "dependsOn": ["sg-rollout", "sg-postmortem-draft"], "blocking": true}
+  ]
+}

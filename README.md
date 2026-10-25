@@ -197,6 +197,36 @@ The web API is rooted at `/api`:
 | `POST /api/compare` | Submit a headless comparison job across scheduling policies. |
 | `GET /api/compare/{jobId}` | Read comparison job status or result. |
 
+### Recovery examples
+
+Three recovery workloads live under [`examples/`](examples/). Each one injects failures that exercise
+every RECOVER-mode outcome once: cache hit, successful retry, substitute, skip, retry-then-cache,
+exhaustion cascade, and a leaf failure with no dependents.
+
+| Example | Preset name | Shape |
+|---------|-------------|-------|
+| [`examples/recovery-build-mesh.json`](examples/recovery-build-mesh.json) | Recovery · Build Mesh | Compile diamond / fan-in |
+| [`examples/recovery-service-graph.json`](examples/recovery-service-graph.json) | Recovery · Service Graph | Multi-service fan-out/join |
+| [`examples/recovery-release-gate.json`](examples/recovery-release-gate.json) | Recovery · Release Gate | Staging→prod with blocking I/O |
+
+The same workloads are available in the browser: start the app, click **Live Java**, and choose a
+**Recovery · …** preset (Build Mesh is preselected).
+
+```bash
+curl -s -X POST http://localhost:8080/api/runs \
+  -H 'Content-Type: application/json' \
+  --data @examples/recovery-build-mesh.json
+
+# Use the returned runId:
+curl -X POST http://localhost:8080/api/runs/<runId>/start
+curl http://localhost:8080/api/runs/<runId>/trace
+```
+
+Recovery here means dependency-aware task failure recovery. It does not restore files or restart
+the application: when a task fails, the advisor selects one bounded catalog operation—retry a
+simulated operation, use a cached result, use a substitute, or skip an optional task. The rule-based
+advisor is offline; the live advisor is optional and falls back to the rule-based advisor.
+
 Default web limits are five concurrent runs, 500 tasks per run, 2,000 in-flight tasks across runs, 16 workers per run, and five minutes of finished-run retention. These are configurable with `threadpool.limits.*`. Task burst estimates are capped at 60,000 ms by `TaskSpecFactory`. Run and compare state are in-memory and do not survive an application restart.
 
 ## Build and run
@@ -224,6 +254,13 @@ Set `JAVA_OPTS` to pass JVM options, or pass application arguments after the scr
 JAVA_OPTS="-Xmx1g" ./run-local.sh
 ./run-local.sh --server.port=8081
 ```
+
+### Local environment configuration
+
+`run-local.sh` automatically loads `.env` when it exists. Use [`.env.example`](.env.example) as
+the template for server, pool limits, SSE settings, LLM endpoint/timeout/call limit, logging, and
+JVM options. The `.env` file is ignored by Git; set `GEMINI_API_KEY` there only when deliberately
+using the Live AI advisor. An empty key keeps the rule-based fallback available.
 
 ### Run CLI demonstrations and benchmarks
 

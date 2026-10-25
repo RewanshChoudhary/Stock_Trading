@@ -1,0 +1,24 @@
+{
+  "policy": "ROUND_ROBIN",
+  "workerCount": 5,
+  "quantum": 10,
+  "recoveryMode": "RECOVER",
+  "advisor": "RULE_BASED",
+  "tasks": [
+    {"id": "rg-candidate", "burstMs": 10, "priority": 8, "dependsOn": [], "blocking": false},
+    {"id": "rg-image-build", "burstMs": 18, "priority": 8, "dependsOn": ["rg-candidate"], "blocking": true},
+    {"id": "rg-image-scan", "burstMs": 20, "priority": 9, "dependsOn": ["rg-image-build"], "failAtMs": 8, "blocking": false},
+    {"id": "rg-deploy-staging", "burstMs": 16, "priority": 8, "dependsOn": ["rg-image-scan"], "blocking": true},
+    {"id": "rg-smoke-tests", "burstMs": 22, "priority": 8, "dependsOn": ["rg-deploy-staging"], "failAtMs": 9, "blocking": false},
+    {"id": "rg-load-probe", "burstMs": 24, "priority": 6, "dependsOn": ["rg-deploy-staging"], "failAtMs": 10, "blocking": false},
+    {"id": "rg-changelog", "burstMs": 11, "priority": 2, "dependsOn": ["rg-candidate"], "failAtMs": 5, "blocking": false},
+    {"id": "rg-staging-gate", "burstMs": 14, "priority": 9, "dependsOn": ["rg-smoke-tests", "rg-load-probe", "rg-changelog"], "blocking": false},
+    {"id": "rg-staging-verify", "burstMs": 26, "priority": 9, "dependsOn": ["rg-staging-gate"], "failAtMs": 12, "blocking": false},
+    {"id": "rg-promote", "burstMs": 13, "priority": 8, "dependsOn": ["rg-staging-verify"], "blocking": true},
+    {"id": "rg-prod-health", "burstMs": 19, "priority": 9, "dependsOn": ["rg-promote"], "failAtMs": 7, "blocking": false},
+    {"id": "rg-traffic-shift", "burstMs": 15, "priority": 8, "dependsOn": ["rg-prod-health"], "blocking": true},
+    {"id": "rg-heartbeat", "burstMs": 9, "priority": 1, "dependsOn": ["rg-candidate"], "failAtMs": 4, "blocking": false},
+    {"id": "rg-rollback-plan", "burstMs": 12, "priority": 4, "dependsOn": ["rg-staging-verify"], "blocking": false},
+    {"id": "rg-announce", "burstMs": 8, "priority": 2, "dependsOn": ["rg-traffic-shift", "rg-rollback-plan"], "blocking": true}
+  ]
+}

@@ -11,7 +11,7 @@ const fmt = (n: number) => `${Math.round(n)} ms`;
 export default function App() {
   const [mode, setMode] = useState<'simulated' | 'live'>('simulated');
   const [tasks, setTasks] = useState<TaskDef[]>(presets['Build pipeline']); const [preset, setPreset] = useState('Build pipeline'); const [policy, setPolicy] = useState<Policy>('FCFS');
-  const [workers, setWorkers] = useState(4); const [quantum, setQuantum] = useState(12); const [speed, setSpeed] = useState(1); const [presenter, setPresenter] = useState(false);
+  const [workers, setWorkers] = useState(4); const [quantum, setQuantum] = useState(12); const [speed, setSpeed] = useState(.5); const [presenter, setPresenter] = useState(false);
   const [run, setRun] = useState<Run | null>(null); const [clock, setClock] = useState(0); const [playing, setPlaying] = useState(false); const [selected, setSelected] = useState<string | null>(null);
   const [listView, setListView] = useState(false); const [critical, setCritical] = useState(false); const [zoom, setZoom] = useState(1); const [toast, setToast] = useState(''); const [taskForm, setTaskForm] = useState(false); const [depForm, setDepForm] = useState(false);
   const [newId, setNewId] = useState(''); const [newBurst, setNewBurst] = useState(16); const [depSource, setDepSource] = useState(''); const [depTarget, setDepTarget] = useState(''); const [compare, setCompare] = useState<{ policy: Policy; duration: number; wait: number }[] | null>(null);
@@ -43,6 +43,8 @@ export default function App() {
       <div className="header-actions"><span className="live-chip"><span /> MODEL READY</span><button className="mode-toggle" onClick={() => setMode('live')}>Live Java <ArrowRight size={15} /></button><button className="mode-toggle" onClick={() => setPresenter(!presenter)}>{presenter ? 'Workspace' : 'Presenter'} <ArrowUpRight size={15} /></button></div>
     </header>
 
+    <section className="recovery-banner" aria-label="Recovery-first execution overview"><div><p className="eyebrow">RECOVERY-FIRST EXECUTION</p><h2>When a task fails, the graph gets a second chance.</h2><p>Failure is observed, an advisor selects a bounded recovery action, and only then are dependent tasks released. Switch to Live Java to watch the real pool make that decision.</p></div><div className="recovery-flow" aria-label="Failure recovery flow"><span className="recovery-step recovery-failed">FAILED</span><ArrowRight size={18} /><span className="recovery-step recovery-advisor">ADVISOR</span><ArrowRight size={18} /><span className="recovery-step recovery-release">RELEASE DEPENDENTS</span></div></section>
+
     <div className="workspace">
       {!presenter && <aside className="control-rail panel paper-panel">
         <div className="panel-heading"><span className="number-stamp">01</span><div><p className="eyebrow">CONFIGURE</p><h2>Control rail</h2></div></div>
@@ -55,7 +57,7 @@ export default function App() {
         <div className="control-divider" />
         <div className="playback-heading"><span className="eyebrow">PLAYBACK</span><span className="clock-readout">{fmt(now)}</span></div>
         <div className="playback-buttons"><button className="button-primary" onClick={() => run ? setPlaying(!playing) : startRun()} aria-label={playing ? 'Pause simulation' : run ? 'Resume simulation' : 'Play simulation'}>{playing ? <Pause size={17} /> : <Play size={17} fill="currentColor" />}<span>{playing ? 'Pause' : run ? 'Resume' : 'Run simulation'}</span></button><button className="icon-button" onClick={() => run ? (setClock(Math.min(run.duration, now + 10)), setPlaying(false)) : startRun()} aria-label="Step one event" title="Step"><SkipForward size={18} /></button><button className="icon-button" onClick={reset} aria-label="Reset simulation" title="Reset"><RotateCcw size={17} /></button></div>
-        <label className="speed-control" htmlFor="speed">Playback speed <select id="speed" value={speed} onChange={e => setSpeed(Number(e.target.value))}>{[0.25, 0.5, 1, 2, 4].map(n => <option key={n} value={n}>{n}×</option>)}</select></label>
+        <label className="speed-control" htmlFor="speed">Playback speed <select id="speed" value={speed} onChange={e => setSpeed(Number(e.target.value))}>{[0.1, 0.25, 0.5, 1, 2].map(n => <option key={n} value={n}>{n}×</option>)}</select></label>
         <div className="rail-footer"><Sparkles size={16} /><span>Every run is deterministic for this graph.</span></div>
       </aside>}
 

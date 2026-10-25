@@ -1,0 +1,25 @@
+{
+  "policy": "CRITICAL_PATH",
+  "workerCount": 6,
+  "quantum": 10,
+  "recoveryMode": "RECOVER",
+  "advisor": "RULE_BASED",
+  "tasks": [
+    {"id": "bm-workspace", "burstMs": 8, "priority": 8, "dependsOn": [], "blocking": false},
+    {"id": "bm-checkout", "burstMs": 12, "priority": 7, "dependsOn": [], "blocking": true},
+    {"id": "bm-parse", "burstMs": 22, "priority": 9, "dependsOn": ["bm-workspace", "bm-checkout"], "failAtMs": 8, "blocking": false},
+    {"id": "bm-compile", "burstMs": 26, "priority": 9, "dependsOn": ["bm-parse"], "blocking": false},
+    {"id": "bm-unit-tests", "burstMs": 24, "priority": 8, "dependsOn": ["bm-compile"], "failAtMs": 10, "blocking": false},
+    {"id": "bm-optimize", "burstMs": 20, "priority": 6, "dependsOn": ["bm-compile"], "failAtMs": 9, "blocking": false},
+    {"id": "bm-docs-lint", "burstMs": 14, "priority": 3, "dependsOn": ["bm-checkout"], "failAtMs": 6, "blocking": false},
+    {"id": "bm-link", "burstMs": 16, "priority": 8, "dependsOn": ["bm-unit-tests", "bm-optimize", "bm-docs-lint"], "blocking": false},
+    {"id": "bm-integration", "burstMs": 28, "priority": 9, "dependsOn": ["bm-link"], "failAtMs": 12, "blocking": false},
+    {"id": "bm-package", "burstMs": 15, "priority": 7, "dependsOn": ["bm-integration"], "blocking": false},
+    {"id": "bm-sign-artifact", "burstMs": 18, "priority": 8, "dependsOn": ["bm-package"], "failAtMs": 7, "blocking": false},
+    {"id": "bm-deploy", "burstMs": 14, "priority": 7, "dependsOn": ["bm-sign-artifact"], "blocking": true},
+    {"id": "bm-release-notes", "burstMs": 10, "priority": 2, "dependsOn": ["bm-package"], "blocking": false},
+    {"id": "bm-telemetry-ping", "burstMs": 11, "priority": 1, "dependsOn": ["bm-workspace"], "failAtMs": 5, "blocking": false},
+    {"id": "bm-audit", "burstMs": 9, "priority": 3, "dependsOn": ["bm-deploy", "bm-release-notes"], "blocking": false},
+    {"id": "bm-notify", "burstMs": 7, "priority": 2, "dependsOn": ["bm-audit"], "blocking": true}
+  ]
+}
