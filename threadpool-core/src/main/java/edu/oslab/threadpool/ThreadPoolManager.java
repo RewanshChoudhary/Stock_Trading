@@ -594,9 +594,12 @@ public final class ThreadPoolManager implements AutoCloseable {
     }
 
     private void handleTaskFailureLocked(Task task, String reason, long nowNanos) {
+        if (task.state() != TaskState.FAILED) {
+            task.transitionTo(TaskState.FAILED, nowNanos, reason);
+        }
         fireEvent(current -> current.onTaskFailed(task.id(), reason));
         Set<String> descendants = dependencyGraph.descendantsOf(task.id());
-        if (recoveryMode != RecoveryMode.RECOVER || descendants.isEmpty()) {
+        if (recoveryMode != RecoveryMode.RECOVER || !recoveryOptionProvider.isConfigured() || descendants.isEmpty()) {
             failDescendantsLocked(task.id(), nowNanos, reason);
             return;
         }

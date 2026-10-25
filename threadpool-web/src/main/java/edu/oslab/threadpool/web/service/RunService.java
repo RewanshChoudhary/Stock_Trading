@@ -136,7 +136,7 @@ public class RunService {
         edu.oslab.threadpool.RecoveryOptionProvider optionProvider = hasExplicitRecoverySelection
                 && recoveryMode == RecoveryModeKind.RECOVER
                         ? RecoveryCatalog::optionsFor
-                        : (task, reason) -> List.of();
+                        : edu.oslab.threadpool.RecoveryOptionProvider.none();
         Run run = new Run(
                 runId,
                 policy,
