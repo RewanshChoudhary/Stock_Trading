@@ -23,7 +23,7 @@ class RunControllerTest extends RestApiTestSupport {
         assertEquals(200, status(response));
 
         JsonNode presets = json(response);
-        assertEquals(6, presets.size());
+        assertEquals(11, presets.size());
         assertEquals("Build Pipeline", presets.get(0).get("name").asText());
         assertEquals(9, presets.get(0).get("tasks").size());
         assertEquals("Cycle Demo", presets.get(1).get("name").asText());

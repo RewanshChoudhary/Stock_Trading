@@ -31,7 +31,7 @@ public final class RecoveryCatalog {
     private static final List<RecoveryCatalogEntry> ENTRIES = List.of(RETRY, CACHE, SUBSTITUTE, SKIP);
 
     /**
-     * Failing task ids from the three Recovery presets. Leaf failures are intentionally absent —
+     * Failing task ids from the recovery presets. Leaf failures are intentionally absent —
      * they have no descendants, so the pool never opens a recovery session.
      */
     private static final Map<String, Profile> PROFILES = Map.ofEntries(
@@ -55,7 +55,28 @@ public final class RecoveryCatalog {
             Map.entry("rg-load-probe", Profile.SUBSTITUTE_PATH),
             Map.entry("rg-changelog", Profile.OPTIONAL_SKIP),
             Map.entry("rg-staging-verify", Profile.RETRY_THEN_CACHE),
-            Map.entry("rg-prod-health", Profile.EXHAUST));
+            Map.entry("rg-prod-health", Profile.EXHAUST),
+            // Recovery · Global E-Commerce Omnichannel Mesh
+            Map.entry("ecom-tax-nexus", Profile.CACHE_HIT),
+            Map.entry("ecom-fraud-score", Profile.FLAKY_RETRY),
+            Map.entry("ecom-payment-primary", Profile.SUBSTITUTE_PATH),
+            Map.entry("ecom-loyalty-calc", Profile.OPTIONAL_SKIP),
+            Map.entry("ecom-inventory-hold", Profile.RETRY_THEN_CACHE),
+            Map.entry("ecom-fiscal-seal", Profile.EXHAUST),
+            // Recovery · Real-Time Financial Risk & Settlement
+            Map.entry("fin-volatility-surface", Profile.CACHE_HIT),
+            Map.entry("fin-margin-netting", Profile.FLAKY_RETRY),
+            Map.entry("fin-clearing-primary", Profile.SUBSTITUTE_PATH),
+            Map.entry("fin-news-sentiment", Profile.OPTIONAL_SKIP),
+            Map.entry("fin-counterparty-rating", Profile.RETRY_THEN_CACHE),
+            Map.entry("fin-aml-sanctions-check", Profile.EXHAUST),
+            // Recovery · Autonomous Multi-Cloud AI & K8s Pipeline
+            Map.entry("cloud-docker-base-layer", Profile.CACHE_HIT),
+            Map.entry("cloud-etcd-cluster-sync", Profile.FLAKY_RETRY),
+            Map.entry("cloud-gpu-instance-alloc", Profile.SUBSTITUTE_PATH),
+            Map.entry("cloud-datadog-agent-init", Profile.OPTIONAL_SKIP),
+            Map.entry("cloud-vault-secrets-fetch", Profile.RETRY_THEN_CACHE),
+            Map.entry("cloud-root-cert-authority", Profile.EXHAUST));
 
     enum Profile {
         CACHE_HIT,
@@ -74,8 +95,30 @@ public final class RecoveryCatalog {
         return ENTRIES;
     }
 
+    private static Profile resolveProfile(String taskId) {
+        Profile profile = PROFILES.get(taskId);
+        if (profile != null) {
+            return profile;
+        }
+        String lower = taskId.toLowerCase();
+        if (lower.contains("retry-cache")) {
+            return Profile.RETRY_THEN_CACHE;
+        } else if (lower.contains("cache")) {
+            return Profile.CACHE_HIT;
+        } else if (lower.contains("retry")) {
+            return Profile.FLAKY_RETRY;
+        } else if (lower.contains("substitute") || lower.contains("-sub-")) {
+            return Profile.SUBSTITUTE_PATH;
+        } else if (lower.contains("skip") || lower.contains("optional")) {
+            return Profile.OPTIONAL_SKIP;
+        } else if (lower.contains("exhaust")) {
+            return Profile.EXHAUST;
+        }
+        return Profile.DEFAULT;
+    }
+
     public static List<RecoveryOption> optionsFor(Task task, String ignoredFailureReason) {
-        Profile profile = PROFILES.getOrDefault(task.id(), Profile.DEFAULT);
+        Profile profile = resolveProfile(task.id());
         long burst = Math.max(1, task.spec().estimatedBurstMillis());
         return switch (profile) {
             case CACHE_HIT -> List.of(

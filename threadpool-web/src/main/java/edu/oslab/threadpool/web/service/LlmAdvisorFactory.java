@@ -15,7 +15,7 @@ import java.time.Duration;
 @Component
 public final class LlmAdvisorFactory {
     private static final String DEFAULT_ENDPOINT =
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent";
 
     private final ObjectMapper objectMapper;
     private final String endpoint;
@@ -25,7 +25,7 @@ public final class LlmAdvisorFactory {
     public LlmAdvisorFactory(
             ObjectMapper objectMapper,
             @Value("${threadpool.recovery.llm.endpoint:" + DEFAULT_ENDPOINT + "}") String endpoint,
-            @Value("${threadpool.recovery.llm.timeout-ms:3000}") long timeoutMillis,
+            @Value("${threadpool.recovery.llm.timeout-ms:10000}") long timeoutMillis,
             @Value("${threadpool.recovery.llm.max-calls:10}") int maxCalls) {
         this.objectMapper = objectMapper;
         this.endpoint = endpoint;
@@ -51,7 +51,17 @@ public final class LlmAdvisorFactory {
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
                     .build();
-            return client.send(request, HttpResponse.BodyHandlers.ofString()).body();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                String details = response.body() == null ? "" : response.body().trim();
+                if (details.length() > 500) {
+                    details = details.substring(0, 500);
+                }
+                throw new IllegalStateException(
+                        "Gemini API returned HTTP " + response.statusCode()
+                                + (details.isEmpty() ? "" : ": " + details));
+            }
+            return response.body();
         };
         return new LlmRecoveryAdvisor(objectMapper, transport, maxCalls);
     }

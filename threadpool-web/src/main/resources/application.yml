@@ -22,8 +22,8 @@ threadpool:
     heartbeat-seconds: 15
   recovery:
     llm:
-      endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent
-      timeout-ms: 3000
+      endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent
+      timeout-ms: 10000
       max-calls: 10
 
 logging:

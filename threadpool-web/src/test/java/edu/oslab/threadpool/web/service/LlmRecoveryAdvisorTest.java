@@ -35,6 +35,28 @@ class LlmRecoveryAdvisorTest {
     }
 
     @Test
+    void parsesGeminiCandidateEnvelope() {
+        String geminiResponse = """
+                {
+                  "candidates": [{
+                    "content": {
+                      "parts": [{
+                        "text": "{\\"optionId\\":\\"cache\\",\\"reason\\":\\"verified cache\\"}"
+                      }]
+                    }
+                  }]
+                }
+                """;
+
+        RecoveryDecision decision = new LlmRecoveryAdvisor(
+                mapper, prompt -> geminiResponse, 1).choose(context());
+
+        assertEquals("cache", decision.optionId());
+        assertEquals("Live AI", decision.source());
+        assertTrue(!decision.fallback());
+    }
+
+    @Test
     void transportFailureUsesTheOfflineAdvisor() {
         RecoveryDecision decision = new LlmRecoveryAdvisor(
                 mapper, prompt -> { throw new java.net.http.HttpTimeoutException("timed out"); }, 1)

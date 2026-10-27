@@ -32,6 +32,9 @@ class PresetValidationTest extends RestApiTestSupport {
         expectedTaskCounts.put("Recovery · Build Mesh", 16);
         expectedTaskCounts.put("Recovery · Service Graph", 18);
         expectedTaskCounts.put("Recovery · Release Gate", 15);
+        expectedTaskCounts.put("Recovery · E-Commerce Mesh", 48);
+        expectedTaskCounts.put("Recovery · Financial Settlement", 52);
+        expectedTaskCounts.put("Recovery · Cloud AI Pipeline", 50);
 
         assertEquals(expectedTaskCounts.size(), presets.size());
         for (int index = 0; index < presets.size(); index++) {
